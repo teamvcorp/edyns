@@ -6,15 +6,32 @@ import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
+import { ButtonLink } from '@/components/elements/button'
 
 export const metadata: Metadata = { title: 'Partners' }
 
-export default async function AdminPartnersPage() {
+export default async function AdminPartnersPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ created?: string; email?: string }>
+}) {
   await requireRole('admin', '/admin/login')
+  const sp = await searchParams
   const [partners, counts] = await Promise.all([listPartners(), propertyCountsByPartner()])
 
   return (
     <PortalShell eyebrow="Administration" title={`Partners (${partners.length})`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {sp.created ? (
+          <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
+            Partner created.{sp.email === 'failed' ? ' (Credentials email failed to send — share the password manually.)' : ' Credentials emailed.'}
+          </p>
+        ) : (
+          <span />
+        )}
+        <ButtonLink href="/admin/partners/new">Add partner</ButtonLink>
+      </div>
+
       {partners.length === 0 ? (
         <Card>
           <Text className="text-sm/6">

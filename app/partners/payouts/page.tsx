@@ -127,6 +127,10 @@ export default async function PartnerPayoutsPage({
               <p>Set up your connected account below to request a payout.</p>
             </Text>
           )}
+          <p className="text-xs text-olive-600 dark:text-olive-500">
+            Stripe processing and payout fees are your responsibility and may be deducted by Stripe from your transfers
+            and bank payouts.
+          </p>
         </Card>
 
         {/* Connected account */}

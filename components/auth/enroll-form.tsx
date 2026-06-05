@@ -50,8 +50,17 @@ function Field({
   )
 }
 
-export function EnrollForm() {
-  const [state, formAction, pending] = useActionState(enrollPartner, undefined)
+type PartnerAction = (prev: EnrollState, formData: FormData) => Promise<EnrollState>
+
+export function EnrollForm({
+  action = enrollPartner,
+  mode = 'self',
+}: {
+  action?: PartnerAction
+  mode?: 'self' | 'admin'
+}) {
+  const [state, formAction, pending] = useActionState(action, undefined)
+  const admin = mode === 'admin'
 
   return (
     <form action={formAction} className="flex flex-col gap-8">
@@ -70,9 +79,9 @@ export function EnrollForm() {
           <Field label="Phone" name="phone" type="tel" state={state} autoComplete="tel" placeholder="(555) 555-1234" />
         </div>
         <Field
-          label="Password"
+          label={admin ? 'Temporary password' : 'Password'}
           name="password"
-          type="password"
+          type={admin ? 'text' : 'password'}
           state={state}
           autoComplete="new-password"
           placeholder="At least 8 characters"
@@ -113,8 +122,15 @@ export function EnrollForm() {
         </p>
       )}
 
+      {admin && (
+        <p className="text-sm text-olive-600 dark:text-olive-500">
+          The partner will be emailed their temporary password and a sign-in link. Property partners have no application
+          fee.
+        </p>
+      )}
+
       <Button type="submit" size="lg" disabled={pending} className="w-full disabled:opacity-60">
-        {pending ? 'Creating account…' : 'Create partner account'}
+        {pending ? 'Creating account…' : admin ? 'Create partner account' : 'Create partner account'}
       </Button>
     </form>
   )

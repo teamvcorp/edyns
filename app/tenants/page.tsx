@@ -5,7 +5,7 @@ import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment } from '@/app/actions/tenants'
 import { startRentCollection } from '@/app/actions/billing'
-import { COLLECTION_RATE } from '@/lib/stripe'
+import { COLLECTION_RATE, withProcessingFee } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
@@ -65,6 +65,7 @@ export default async function TenantPortalPage({
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
   const billableIncome = verifiedIncome ?? tenant.employment.monthlyIncome
   const monthlyCollection = billableIncome * COLLECTION_RATE
+  const monthlyChargeTotal = withProcessingFee(Math.round(monthlyCollection * 100)) / 100
   const billing = tenant.billing
   const bannerMsg = sp.billing === 'started' ? billingBanner.started : sp.error ? billingBanner[sp.error] : undefined
 
@@ -164,7 +165,10 @@ export default async function TenantPortalPage({
         ) : (
           <>
             <Text className="text-sm/6">
-              <p>Connect your bank through Plaid to verify your employment income.</p>
+              <p>
+                Connect your bank through Plaid to verify your employment income. Any Plaid verification fees are covered
+                by you.
+              </p>
             </Text>
             <PlaidVerifyButton />
           </>
@@ -182,17 +186,20 @@ export default async function TenantPortalPage({
         {billing ? (
           <Text className="text-sm/6">
             <p>
-              Collecting <strong>{formatCurrency(billing.monthlyAmountCents / 100)}/mo</strong> ({Math.round(COLLECTION_RATE * 100)}% of
-              your income) to your payment method.
+              Collecting <strong>{formatCurrency(billing.monthlyAmountCents / 100)}/mo</strong> to your payment method —{' '}
+              {Math.round(COLLECTION_RATE * 100)}% of your income ({formatCurrency(monthlyCollection)}) plus Stripe
+              processing, which you cover.
             </p>
           </Text>
         ) : tenant.status === 'approved' ? (
           <>
             <Text className="text-sm/6">
               <p>
-                We collect {Math.round(COLLECTION_RATE * 100)}% of your monthly income as rent — about{' '}
+                We collect {Math.round(COLLECTION_RATE * 100)}% of your monthly income as rent —{' '}
                 <strong>{formatCurrency(monthlyCollection)}/mo</strong> based on{' '}
-                {verifiedIncome ? 'your verified income' : 'your reported income'}.
+                {verifiedIncome ? 'your verified income' : 'your reported income'}. You’re charged about{' '}
+                <strong>{formatCurrency(monthlyChargeTotal)}/mo</strong>, which includes the Stripe processing fee (you
+                cover all Stripe &amp; Plaid fees).
               </p>
             </Text>
             <form action={startRentCollection}>

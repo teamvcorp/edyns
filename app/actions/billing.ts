@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
 import { requireRole } from '@/lib/dal'
 import { getTenantByUserId, setBilling } from '@/lib/tenants'
-import { getStripe, COLLECTION_RATE } from '@/lib/stripe'
+import { getStripe, COLLECTION_RATE, withProcessingFee } from '@/lib/stripe'
 
 /**
  * Start recurring rent collection: a Stripe subscription that charges 40% of the
@@ -20,8 +20,10 @@ export async function startRentCollection(): Promise<void> {
   if (!tenant!.stripeCustomerId || !tenant!.defaultPaymentMethodId) redirect('/tenants?error=no-payment-method')
 
   const income = tenant!.employment.verifiedMonthlyIncome ?? tenant!.employment.monthlyIncome
-  const monthlyAmountCents = Math.round(income * COLLECTION_RATE * 100)
-  if (monthlyAmountCents <= 0) redirect('/tenants?error=no-income')
+  const rentCents = Math.round(income * COLLECTION_RATE * 100)
+  if (rentCents <= 0) redirect('/tenants?error=no-income')
+  // Gross up so the tenant covers Stripe's fee and edynsgate nets the full 40%.
+  const monthlyAmountCents = withProcessingFee(rentCents)
 
   const stripe = getStripe()
   const product = await stripe.products.create({

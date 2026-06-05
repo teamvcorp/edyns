@@ -5,14 +5,20 @@ import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
+import { ButtonLink } from '@/components/elements/button'
 
 export const metadata: Metadata = { title: 'Tenant applications' }
 
 const feeLabel = { unpaid: 'Fee unpaid', processing: 'Fee processing', paid: 'Fee paid' } as const
 const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' } as const
 
-export default async function AdminTenantsPage() {
+export default async function AdminTenantsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ created?: string; email?: string }>
+}) {
   await requireRole('admin', '/admin/login')
+  const sp = await searchParams
   const tenants = await listTenants()
   const pending = tenants.filter((t) => t.status === 'pending')
   const decided = tenants.filter((t) => t.status !== 'pending')
@@ -35,6 +41,17 @@ export default async function AdminTenantsPage() {
 
   return (
     <PortalShell eyebrow="Administration" title={`Tenant applications (${tenants.length})`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {sp.created ? (
+          <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
+            Tenant created.{sp.email === 'failed' ? ' (Credentials email failed to send — share the password manually.)' : ' Credentials emailed.'}
+          </p>
+        ) : (
+          <span />
+        )}
+        <ButtonLink href="/admin/tenants/new">Add tenant</ButtonLink>
+      </div>
+
       <div className="flex flex-col gap-6">
         <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Pending ({pending.length})</h3>
         {pending.length === 0 ? (

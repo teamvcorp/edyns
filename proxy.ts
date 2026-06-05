@@ -24,10 +24,10 @@ export async function proxy(req: NextRequest) {
   const session = await decrypt(req.cookies.get(SESSION_COOKIE)?.value)
   const isPublicPath = area.publicPaths.includes(pathname)
 
-  // Public pages (login, enroll): if already signed in with the right role,
-  // skip them and go to the portal; otherwise allow through.
   if (isPublicPath) {
-    if (session?.role === area.role) {
+    // Bounce already-signed-in users off the LOGIN page only — keep enroll (and
+    // other public pages) reachable even when authenticated.
+    if (pathname === area.login && session?.role === area.role) {
       return NextResponse.redirect(new URL(area.prefix, req.nextUrl))
     }
     return NextResponse.next()

@@ -105,10 +105,19 @@ function PeopleEditor({
   )
 }
 
-export function TenantEnrollForm() {
-  const [state, formAction, pending] = useActionState(enrollTenant, undefined)
+type TenantAction = (prev: TenantEnrollState, formData: FormData) => Promise<TenantEnrollState>
+
+export function TenantEnrollForm({
+  action = enrollTenant,
+  mode = 'self',
+}: {
+  action?: TenantAction
+  mode?: 'self' | 'admin'
+}) {
+  const [state, formAction, pending] = useActionState(action, undefined)
   const [adults, setAdults] = useState<Person[]>([])
   const [children, setChildren] = useState<Person[]>([])
+  const admin = mode === 'admin'
 
   const cleanAdults = adults.filter((p) => p.name.trim() && p.dob)
   const cleanChildren = children.filter((p) => p.name.trim() && p.dob)
@@ -127,7 +136,14 @@ export function TenantEnrollForm() {
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Date of birth" name="dob" type="date" state={state} />
-          <Field label="Password" name="password" type="password" state={state} autoComplete="new-password" placeholder="At least 8 characters" />
+          <Field
+            label={admin ? 'Temporary password' : 'Password'}
+            name="password"
+            type={admin ? 'text' : 'password'}
+            state={state}
+            autoComplete="new-password"
+            placeholder="At least 8 characters"
+          />
         </div>
       </fieldset>
 
@@ -184,12 +200,26 @@ export function TenantEnrollForm() {
 
       <div className="flex flex-col gap-2">
         <Button type="submit" size="lg" disabled={pending} className="w-fit disabled:opacity-60">
-          {pending ? 'Starting…' : 'Continue to payment'}
+          {pending ? (admin ? 'Creating…' : 'Starting…') : admin ? 'Create tenant account' : 'Continue to payment'}
         </Button>
-        <p className="text-sm text-olive-600 dark:text-olive-500">
-          Next you’ll pay the <strong>$25 application fee</strong> (plus processing — you cover Stripe’s fee). Bank
-          account preferred; card accepted. Your application stays pending until an admin approves it.
-        </p>
+        {admin ? (
+          <p className="text-sm text-olive-600 dark:text-olive-500">
+            The tenant will be emailed their temporary password and a sign-in link. Their first step is to sign in and
+            pay the <strong>$25 application fee</strong>. The application stays pending until paid and approved.
+          </p>
+        ) : (
+          <>
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              Next you’ll pay the <strong>$25 application fee</strong> (plus processing). Bank account preferred; card
+              accepted. Your application stays pending until an admin approves it.
+            </p>
+            <p className="text-xs text-olive-600 dark:text-olive-500">
+              By continuing you agree to cover all third-party processing fees: Stripe fees on the application fee and
+              your ongoing rent collection, and any Plaid fees for income verification. These are added to the amounts
+              charged to you.
+            </p>
+          </>
+        )}
       </div>
     </form>
   )
