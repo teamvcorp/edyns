@@ -4,7 +4,7 @@ import { Link } from '@/components/elements/link'
 import { Logo } from './logo'
 
 const navLinks = [
-  { href: '/#mission', label: 'Mission' },
+  { href: '/properties', label: 'Browse homes' },
   { href: '/#pillars', label: 'What we do' },
   { href: '/#audiences', label: 'Who we serve' },
 ]

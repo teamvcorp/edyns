@@ -1,0 +1,204 @@
+import 'server-only'
+
+import { ObjectId, type Collection } from 'mongodb'
+import { getDb } from './mongodb'
+import type { Address } from './users'
+
+export interface Person {
+  name: string
+  dob: string // ISO date string (yyyy-mm-dd)
+}
+
+export interface Employment {
+  employer: string
+  jobTitle: string
+  monthlyIncome: number
+  employerPhone?: string
+  /** Set once Plaid income/employment verification is wired. */
+  verified?: boolean
+}
+
+export type ApplicationStatus = 'pending' | 'approved' | 'rejected'
+export type FeeStatus = 'unpaid' | 'processing' | 'paid'
+
+export interface TenantDoc {
+  _id: ObjectId
+  userId: ObjectId
+  // Head of household (name/email mirror the user account for easy admin display)
+  name: string
+  email: string
+  phone: string
+  dob: string
+  address: Address
+  adults: Person[] // additional household members 18+
+  children: Person[]
+  employment: Employment
+  status: ApplicationStatus
+  rejectionReason?: string
+  fee: {
+    status: FeeStatus
+    amountCents: number
+    stripeSessionId?: string
+    paymentIntentId?: string
+    paidAt?: Date
+  }
+  stripeCustomerId?: string
+  defaultPaymentMethodId?: string
+  /** Tenants start at tier 0 on approval and move up as they relocate. */
+  currentTier?: number
+  currentPropertyId?: ObjectId
+  createdAt: Date
+  updatedAt: Date
+  approvedAt?: Date
+}
+
+export type Tenant = Omit<TenantDoc, '_id' | 'userId' | 'currentPropertyId'> & {
+  id: string
+  userId: string
+  currentPropertyId?: string
+}
+
+async function tenantsCollection(): Promise<Collection<TenantDoc>> {
+  const db = await getDb()
+  const col = db.collection<TenantDoc>('tenants')
+  await col.createIndex({ userId: 1 }, { unique: true })
+  await col.createIndex({ status: 1 })
+  await col.createIndex({ 'fee.stripeSessionId': 1 })
+  return col
+}
+
+function toTenant(doc: TenantDoc): Tenant {
+  const { _id, userId, currentPropertyId, ...rest } = doc
+  return {
+    ...rest,
+    id: _id.toString(),
+    userId: userId.toString(),
+    currentPropertyId: currentPropertyId?.toString(),
+  }
+}
+
+export async function createTenantApplication(
+  userId: string,
+  input: {
+    name: string
+    email: string
+    phone: string
+    dob: string
+    address: Address
+    adults: Person[]
+    children: Person[]
+    employment: Employment
+    feeAmountCents: number
+  },
+): Promise<Tenant> {
+  const col = await tenantsCollection()
+  const now = new Date()
+  const doc: TenantDoc = {
+    _id: new ObjectId(),
+    userId: new ObjectId(userId),
+    name: input.name,
+    email: input.email,
+    phone: input.phone,
+    dob: input.dob,
+    address: input.address,
+    adults: input.adults,
+    children: input.children,
+    employment: input.employment,
+    status: 'pending',
+    fee: { status: 'unpaid', amountCents: input.feeAmountCents },
+    createdAt: now,
+    updatedAt: now,
+  }
+  await col.insertOne(doc)
+  return toTenant(doc)
+}
+
+export async function getTenantByUserId(userId: string): Promise<Tenant | null> {
+  if (!ObjectId.isValid(userId)) return null
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ userId: new ObjectId(userId) })
+  return doc ? toTenant(doc) : null
+}
+
+export async function getTenantById(id: string): Promise<Tenant | null> {
+  if (!ObjectId.isValid(id)) return null
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ _id: new ObjectId(id) })
+  return doc ? toTenant(doc) : null
+}
+
+export async function attachStripeCustomer(userId: string, customerId: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: { stripeCustomerId: customerId, updatedAt: new Date() } })
+}
+
+export async function setFeeSession(userId: string, sessionId: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { userId: new ObjectId(userId) },
+    { $set: { 'fee.stripeSessionId': sessionId, updatedAt: new Date() } },
+  )
+}
+
+/** Finalize the fee from a completed Checkout session (used by completion page + webhook). Idempotent. */
+export async function applyFeeResult(
+  sessionId: string,
+  result: { status: FeeStatus; paymentIntentId?: string; paymentMethodId?: string },
+): Promise<boolean> {
+  const col = await tenantsCollection()
+  const set: Record<string, unknown> = { 'fee.status': result.status, updatedAt: new Date() }
+  if (result.paymentIntentId) set['fee.paymentIntentId'] = result.paymentIntentId
+  if (result.status === 'paid') set['fee.paidAt'] = new Date()
+  if (result.paymentMethodId) set['defaultPaymentMethodId'] = result.paymentMethodId
+  const res = await col.updateOne({ 'fee.stripeSessionId': sessionId }, { $set: set })
+  return res.matchedCount === 1
+}
+
+// ---- Admin ----
+
+export async function listTenants(): Promise<Tenant[]> {
+  const col = await tenantsCollection()
+  const docs = await col.find({}).sort({ createdAt: -1 }).toArray()
+  return docs.map(toTenant)
+}
+
+export async function approveTenant(id: string): Promise<boolean> {
+  if (!ObjectId.isValid(id)) return false
+  const col = await tenantsCollection()
+  // New approved tenants start at tier 0 unless already placed.
+  const existing = await col.findOne({ _id: new ObjectId(id) })
+  const res = await col.updateOne(
+    { _id: new ObjectId(id) },
+    {
+      $set: {
+        status: 'approved',
+        currentTier: existing?.currentTier ?? 0,
+        approvedAt: new Date(),
+        updatedAt: new Date(),
+      },
+      $unset: { rejectionReason: '' },
+    },
+  )
+  return res.matchedCount === 1
+}
+
+/** Record an approved move-in: place the tenant at the property's tier. */
+export async function placeTenant(tenantId: string, propertyId: string, tier: number): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId) || !ObjectId.isValid(propertyId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    { $set: { currentPropertyId: new ObjectId(propertyId), currentTier: tier, updatedAt: new Date() } },
+  )
+  return res.matchedCount === 1
+}
+
+export async function rejectTenant(id: string, reason: string): Promise<boolean> {
+  if (!ObjectId.isValid(id)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(id) },
+    { $set: { status: 'rejected', rejectionReason: reason, updatedAt: new Date() } },
+  )
+  return res.matchedCount === 1
+}

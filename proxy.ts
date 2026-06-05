@@ -10,10 +10,10 @@ import { decrypt, SESSION_COOKIE, type Role } from '@/lib/session'
  * login. Already-authenticated users are kept out of the login pages.
  */
 
-const areas: { prefix: string; login: string; role: Role }[] = [
-  { prefix: '/partners', login: '/partners/login', role: 'partner' },
-  { prefix: '/tenants', login: '/tenants/login', role: 'tenant' },
-  { prefix: '/admin', login: '/admin/login', role: 'admin' },
+const areas: { prefix: string; login: string; role: Role; publicPaths: string[] }[] = [
+  { prefix: '/partners', login: '/partners/login', role: 'partner', publicPaths: ['/partners/login', '/partners/enroll'] },
+  { prefix: '/tenants', login: '/tenants/login', role: 'tenant', publicPaths: ['/tenants/login', '/tenants/enroll'] },
+  { prefix: '/admin', login: '/admin/login', role: 'admin', publicPaths: ['/admin/login'] },
 ]
 
 export async function proxy(req: NextRequest) {
@@ -22,10 +22,11 @@ export async function proxy(req: NextRequest) {
   if (!area) return NextResponse.next()
 
   const session = await decrypt(req.cookies.get(SESSION_COOKIE)?.value)
-  const isLoginPage = pathname === area.login
+  const isPublicPath = area.publicPaths.includes(pathname)
 
-  // Authenticated with the right role visiting the login page → go to portal.
-  if (isLoginPage) {
+  // Public pages (login, enroll): if already signed in with the right role,
+  // skip them and go to the portal; otherwise allow through.
+  if (isPublicPath) {
     if (session?.role === area.role) {
       return NextResponse.redirect(new URL(area.prefix, req.nextUrl))
     }

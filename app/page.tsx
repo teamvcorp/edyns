@@ -102,12 +102,12 @@ export default function Page() {
               <Subheading className="text-2xl/8 sm:text-3xl/9">Property partners</Subheading>
               <Text className="text-pretty">
                 <p>
-                  List and manage properties, track tenant outcomes, and unlock sustainability incentives — all from a
-                  single partner dashboard.
+                  Hand off problem property, keep 10% equity, and let us rehabilitate it with solar and gray-water reuse
+                  — at no cost to you.
                 </p>
               </Text>
-              <Link href="/partners/login">
-                Partner log in <ArrowNarrowRightIcon />
+              <Link href="/programs/property-partners">
+                Learn more <ArrowNarrowRightIcon />
               </Link>
             </Card>
             <Card className="flex flex-col items-start gap-5">
@@ -117,12 +117,12 @@ export default function Page() {
               <Subheading className="text-2xl/8 sm:text-3xl/9">Tenants</Subheading>
               <Text className="text-pretty">
                 <p>
-                  Find a home, manage your tenancy, and tap into education and support programs designed to help you get
-                  ahead.
+                  The Effort Exchange: work 35 hours a week and your rent and utilities are fully covered — with surplus
+                  saved toward your home.
                 </p>
               </Text>
-              <Link href="/tenants/login">
-                Tenant log in <ArrowNarrowRightIcon />
+              <Link href="/programs/tenants">
+                Learn more <ArrowNarrowRightIcon />
               </Link>
             </Card>
           </div>
