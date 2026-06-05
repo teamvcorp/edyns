@@ -11,9 +11,11 @@ import {
   listPropertiesByPartner,
   getPropertyById,
 } from '@/lib/properties'
-import { updatePartner, deletePartner } from '@/lib/users'
+import { updatePartner, deletePartner, findPartnerById } from '@/lib/users'
 import { approveTenant, rejectTenant, placeTenant } from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
+import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
+import { getStripe } from '@/lib/stripe'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 
 export type AdminActionState = { error?: string } | undefined
@@ -291,4 +293,49 @@ export async function declineMoveInAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '')
   await setRequestStatus(id, 'declined')
   revalidatePath('/admin/move-ins')
+}
+
+// ---- Payout approval ----
+
+export async function approvePayoutAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '')
+
+  const payout = await getPayoutById(id)
+  if (!payout || payout.status !== 'requested') redirect('/admin/payouts')
+
+  const partner = await findPartnerById(payout!.partnerId)
+  if (!partner?.stripeAccountId) redirect('/admin/payouts?error=no-account')
+
+  // Execute the transfer; keep redirect() out of the try so it isn't swallowed.
+  let transferId: string | null = null
+  try {
+    const account = await getStripe().accounts.retrieve(partner!.stripeAccountId!)
+    if (account.payouts_enabled) {
+      const transfer = await getStripe().transfers.create({
+        amount: payout!.amountCents,
+        currency: 'usd',
+        destination: partner!.stripeAccountId!,
+        metadata: { payoutId: id, partnerId: payout!.partnerId },
+      })
+      transferId = transfer.id
+    }
+  } catch {
+    transferId = null
+  }
+
+  if (!transferId) redirect('/admin/payouts?error=transfer-failed')
+
+  await markPayoutPaid(id, transferId)
+  revalidatePath('/admin/payouts')
+  redirect('/admin/payouts?paid=1')
+}
+
+export async function declinePayoutAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '')
+  const note = String(formData.get('note') ?? '').trim()
+  await markPayoutDeclined(id, note || 'Declined by admin.')
+  revalidatePath('/admin/payouts')
+  redirect('/admin/payouts')
 }

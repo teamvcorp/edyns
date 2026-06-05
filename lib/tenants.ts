@@ -14,8 +14,21 @@ export interface Employment {
   jobTitle: string
   monthlyIncome: number
   employerPhone?: string
-  /** Set once Plaid income/employment verification is wired. */
+  /** Set once the bank is connected through Plaid. */
   verified?: boolean
+  /** Monthly income derived from Plaid Bank Income, when available. */
+  verifiedMonthlyIncome?: number
+  verifiedAt?: Date
+}
+
+export type BillingStatus = 'none' | 'active' | 'past_due' | 'canceled'
+
+export interface Billing {
+  /** 40% of (verified or reported) monthly income, in cents. */
+  monthlyAmountCents: number
+  stripeSubscriptionId: string
+  status: BillingStatus
+  startedAt: Date
 }
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected'
@@ -44,6 +57,12 @@ export interface TenantDoc {
   }
   stripeCustomerId?: string
   defaultPaymentMethodId?: string
+  /** Plaid: user token + encrypted access token for income verification. */
+  plaidUserToken?: string
+  plaidAccessTokenEnc?: string
+  plaidItemId?: string
+  /** Recurring rent collection (40% of income) via Stripe. */
+  billing?: Billing
   /** Tenants start at tier 0 on approval and move up as they relocate. */
   currentTier?: number
   currentPropertyId?: ObjectId
@@ -152,6 +171,34 @@ export async function applyFeeResult(
   if (result.paymentMethodId) set['defaultPaymentMethodId'] = result.paymentMethodId
   const res = await col.updateOne({ 'fee.stripeSessionId': sessionId }, { $set: set })
   return res.matchedCount === 1
+}
+
+// ---- Plaid / verification ----
+
+export async function setPlaidUserToken(userId: string, userToken: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: { plaidUserToken: userToken, updatedAt: new Date() } })
+}
+
+export async function savePlaidVerification(
+  userId: string,
+  input: { accessTokenEnc: string; itemId: string; verifiedMonthlyIncome: number | null },
+): Promise<void> {
+  const col = await tenantsCollection()
+  const set: Record<string, unknown> = {
+    plaidAccessTokenEnc: input.accessTokenEnc,
+    plaidItemId: input.itemId,
+    'employment.verified': true,
+    'employment.verifiedAt': new Date(),
+    updatedAt: new Date(),
+  }
+  if (input.verifiedMonthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
+}
+
+export async function setBilling(userId: string, billing: Billing): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: { billing, updatedAt: new Date() } })
 }
 
 // ---- Admin ----

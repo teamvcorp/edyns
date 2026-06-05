@@ -32,10 +32,14 @@ export interface UserDoc {
   billingAddress?: Address
   taxIdEnc?: string
   taxIdLast4?: string
-  /** Reserved for the future Stripe Connect onboarding step. */
+  /** Stripe Connect connected-account id (acct_...) for equity payouts. */
   stripeAccountId?: string
+  /** How often Stripe pays the connected account's balance out to their bank. */
+  payoutFrequency?: PayoutFrequency
   createdAt: Date
 }
+
+export type PayoutFrequency = 'manual' | 'daily' | 'weekly' | 'monthly'
 
 export type PublicUser = {
   id: string
@@ -69,6 +73,8 @@ export type PartnerProfile = PublicUser & {
   phone?: string
   billingAddress?: Address
   taxIdLast4?: string
+  stripeAccountId?: string
+  payoutFrequency?: PayoutFrequency
 }
 
 function toPartnerProfile(doc: UserDoc): PartnerProfile {
@@ -77,7 +83,21 @@ function toPartnerProfile(doc: UserDoc): PartnerProfile {
     phone: doc.phone,
     billingAddress: doc.billingAddress,
     taxIdLast4: doc.taxIdLast4,
+    stripeAccountId: doc.stripeAccountId,
+    payoutFrequency: doc.payoutFrequency,
   }
+}
+
+export async function setStripeAccountId(userId: string, accountId: string): Promise<void> {
+  if (!ObjectId.isValid(userId)) return
+  const col = await usersCollection()
+  await col.updateOne({ _id: new ObjectId(userId), role: 'partner' }, { $set: { stripeAccountId: accountId } })
+}
+
+export async function setPayoutFrequency(userId: string, frequency: PayoutFrequency): Promise<void> {
+  if (!ObjectId.isValid(userId)) return
+  const col = await usersCollection()
+  await col.updateOne({ _id: new ObjectId(userId), role: 'partner' }, { $set: { payoutFrequency: frequency } })
 }
 
 /** Safe partner profile by id — never returns the password hash or tax ID ciphertext. */

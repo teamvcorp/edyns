@@ -181,6 +181,19 @@ export async function adminDeleteProperty(id: string): Promise<boolean> {
   return res.deletedCount === 1
 }
 
+/** Total equity generated (USD) across a partner's approved properties. */
+export async function totalEquityByPartner(partnerId: string): Promise<number> {
+  if (!ObjectId.isValid(partnerId)) return 0
+  const col = await propertiesCollection()
+  const rows = await col
+    .aggregate<{ total: number }>([
+      { $match: { partnerId: new ObjectId(partnerId), status: 'approved' } },
+      { $group: { _id: null, total: { $sum: '$equityGenerated' } } },
+    ])
+    .toArray()
+  return rows[0]?.total ?? 0
+}
+
 /** Map of partnerId -> property count (admin list). */
 export async function propertyCountsByPartner(): Promise<Record<string, number>> {
   const col = await propertiesCollection()

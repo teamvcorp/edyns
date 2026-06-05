@@ -16,6 +16,9 @@ export function getStripe(): Stripe {
 /** Base application fee, in cents. */
 export const APPLICATION_FEE_CENTS = 2500
 
+/** Share of a tenant's monthly income collected as rent. */
+export const COLLECTION_RATE = 0.4
+
 /**
  * Total the tenant is charged, grossed up so they cover Stripe's processing fee.
  * Uses the card rate (2.9% + 30¢) as the worst case so fees are always covered

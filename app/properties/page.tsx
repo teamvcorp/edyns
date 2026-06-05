@@ -6,6 +6,7 @@ import { Heading } from '@/components/elements/heading'
 import { Text } from '@/components/elements/text'
 import { Card } from '@/components/elements/card'
 import { PublicPropertyCard } from '@/components/properties/public-property-card'
+import { PropertyFilters } from '@/components/properties/property-filters'
 
 export const metadata: Metadata = {
   title: 'Browse properties',
@@ -15,8 +16,18 @@ export const metadata: Metadata = {
 // Always reflect the current set of approved properties.
 export const dynamic = 'force-dynamic'
 
-export default async function PropertiesPage() {
-  const properties = await listApprovedProperties()
+export default async function PropertiesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ zip?: string; tier?: string }>
+}) {
+  const { zip, tier } = await searchParams
+  const tierNum = tier !== undefined && tier !== '' ? Number(tier) : undefined
+  const properties = await listApprovedProperties({
+    zip: zip?.trim() || undefined,
+    tier: tierNum !== undefined && Number.isFinite(tierNum) ? tierNum : undefined,
+  })
+  const filtered = Boolean(zip || tier)
 
   return (
     <section className="py-16 sm:py-20">
@@ -32,10 +43,12 @@ export default async function PropertiesPage() {
           </Text>
         </div>
 
+        <PropertyFilters zip={zip} tier={tier} />
+
         {properties.length === 0 ? (
           <Card>
             <Text className="text-sm/6">
-              <p>No properties are listed yet. Check back soon.</p>
+              <p>{filtered ? 'No homes match these filters. Try clearing them.' : 'No properties are listed yet. Check back soon.'}</p>
             </Text>
           </Card>
         ) : (

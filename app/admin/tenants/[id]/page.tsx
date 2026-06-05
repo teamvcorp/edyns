@@ -87,9 +87,13 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
           <dl className="grid gap-4 sm:grid-cols-2">
             <Row label="Employer" value={t.employment.employer} />
             <Row label="Job title" value={t.employment.jobTitle} />
-            <Row label="Monthly income" value={formatCurrency(t.employment.monthlyIncome)} />
+            <Row label="Reported income" value={formatCurrency(t.employment.monthlyIncome)} />
             <Row label="Employer phone" value={t.employment.employerPhone ?? '—'} />
             <Row label="Plaid verification" value={t.employment.verified ? 'Verified' : 'Not yet verified'} />
+            <Row
+              label="Verified income"
+              value={t.employment.verifiedMonthlyIncome ? formatCurrency(t.employment.verifiedMonthlyIncome) : '—'}
+            />
           </dl>
         </Card>
 
@@ -99,6 +103,10 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
             <Row label="Status" value={statusLabel[t.status]} />
             <Row label="Fee" value={`${feeLabel[t.fee.status]} · ${formatCurrency(t.fee.amountCents / 100)}`} />
             <Row label="Payment method" value={t.defaultPaymentMethodId ? 'On file' : '—'} />
+            <Row
+              label="Rent collection"
+              value={t.billing ? `${formatCurrency(t.billing.monthlyAmountCents / 100)}/mo · ${t.billing.status}` : 'Not started'}
+            />
           </dl>
           {t.status === 'rejected' && t.rejectionReason && (
             <p className="text-sm text-red-600 dark:text-red-400">Reason: {t.rejectionReason}</p>

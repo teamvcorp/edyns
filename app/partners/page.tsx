@@ -82,15 +82,18 @@ export default async function PartnerPortalPage() {
         </Card>
       )}
 
-      <Card className="flex flex-col gap-2">
-        <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Equity & payouts</h3>
-        <Text className="text-sm/6">
-          <p>
-            Track your 10% stake and resale payouts here. Connecting your account for transfers (Stripe Connect) is
-            coming soon.
-          </p>
-        </Text>
-        <span className="mt-2 text-sm font-medium text-olive-600 dark:text-olive-500">Coming soon</span>
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Equity & payouts</h3>
+            <Text className="text-sm/6">
+              <p>
+                {formatCurrency(totalEquity)} in equity generated. Connect your account to cash out.
+              </p>
+            </Text>
+          </div>
+          <ButtonLink href="/partners/payouts">Manage payouts</ButtonLink>
+        </div>
       </Card>
     </PortalShell>
   )
