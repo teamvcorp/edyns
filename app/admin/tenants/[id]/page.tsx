@@ -107,6 +107,10 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
               label="Rent collection"
               value={t.billing ? `${formatCurrency(t.billing.monthlyAmountCents / 100)}/mo · ${t.billing.status}` : 'Not started'}
             />
+            <Row
+              label="Identity (ID + selfie)"
+              value={t.identityVerified ? `Verified${t.idNumberLast4 ? ` · •••• ${t.idNumberLast4}` : ''}` : 'Not verified'}
+            />
           </dl>
           {t.status === 'rejected' && t.rejectionReason && (
             <p className="text-sm text-red-600 dark:text-red-400">Reason: {t.rejectionReason}</p>
@@ -116,7 +120,11 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
         {t.status === 'pending' && (
           <Card className="flex flex-col gap-4">
             <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Decision</h3>
-            <TenantReviewActions tenantId={t.id} feePaid={t.fee.status === 'paid'} />
+            <TenantReviewActions
+              tenantId={t.id}
+              feePaid={t.fee.status === 'paid'}
+              identityVerified={Boolean(t.identityVerified)}
+            />
           </Card>
         )}
       </Container>

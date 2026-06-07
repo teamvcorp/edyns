@@ -9,6 +9,7 @@ import { COLLECTION_RATE, withProcessingFee } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
+import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -39,7 +40,7 @@ const billingBanner: Record<string, string> = {
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; error?: string }>
+  searchParams: Promise<{ billing?: string; error?: string; identity?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -171,6 +172,31 @@ export default async function TenantPortalPage({
               </p>
             </Text>
             <PlaidVerifyButton />
+          </>
+        )}
+      </Card>
+
+      {/* Identity verification (government ID + selfie) */}
+      <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Identity verification</h3>
+          <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">
+            {tenant.identityVerified ? 'Verified' : 'Not verified'}
+          </span>
+        </div>
+        {tenant.identityVerified ? (
+          <Text className="text-sm/6">
+            <p>
+              Your government ID is verified{tenant.idNumberLast4 ? ` (•••• ${tenant.idNumberLast4})` : ''}. Your full ID
+              is stored securely by Stripe — never by edynsgate.
+            </p>
+          </Text>
+        ) : (
+          <>
+            <Text className="text-sm/6">
+              <p>Verify your government ID and a selfie to complete your application. Handled securely by Stripe.</p>
+            </Text>
+            <IdentityVerifyButton returning={sp.identity === 'done'} />
           </>
         )}
       </Card>

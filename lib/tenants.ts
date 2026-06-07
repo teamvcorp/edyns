@@ -61,6 +61,11 @@ export interface TenantDoc {
   plaidUserToken?: string
   plaidAccessTokenEnc?: string
   plaidItemId?: string
+  /** Stripe Identity (government ID + selfie). Full ID never stored — only last 4. */
+  stripeIdentitySessionId?: string
+  identityVerified?: boolean
+  identityVerifiedAt?: Date
+  idNumberLast4?: string
   /** Recurring rent collection (40% of income) via Stripe. */
   billing?: Billing
   /** Tenants start at tier 0 on approval and move up as they relocate. */
@@ -199,6 +204,40 @@ export async function savePlaidVerification(
 export async function setBilling(userId: string, billing: Billing): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: { billing, updatedAt: new Date() } })
+}
+
+export async function setIdentitySession(userId: string, sessionId: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { userId: new ObjectId(userId) },
+    { $set: { stripeIdentitySessionId: sessionId, updatedAt: new Date() } },
+  )
+}
+
+/**
+ * Persist a verified identity result. Located by userId (from Stripe metadata)
+ * when available, otherwise by the verification session id (webhook fallback).
+ */
+export async function markIdentityVerified(opts: {
+  userId?: string
+  sessionId?: string
+  last4?: string
+}): Promise<void> {
+  const col = await tenantsCollection()
+  const filter =
+    opts.userId && ObjectId.isValid(opts.userId)
+      ? { userId: new ObjectId(opts.userId) }
+      : opts.sessionId
+        ? { stripeIdentitySessionId: opts.sessionId }
+        : null
+  if (!filter) return
+  const set: Record<string, unknown> = {
+    identityVerified: true,
+    identityVerifiedAt: new Date(),
+    updatedAt: new Date(),
+  }
+  if (opts.last4) set.idNumberLast4 = opts.last4
+  await col.updateOne(filter, { $set: set })
 }
 
 // ---- Admin ----

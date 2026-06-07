@@ -7,7 +7,15 @@ import { approveTenantAction, rejectTenantAction, type AdminActionState } from '
 const inputClass =
   'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10'
 
-export function TenantReviewActions({ tenantId, feePaid }: { tenantId: string; feePaid: boolean }) {
+export function TenantReviewActions({
+  tenantId,
+  feePaid,
+  identityVerified,
+}: {
+  tenantId: string
+  feePaid: boolean
+  identityVerified: boolean
+}) {
   const [approveState, approveAction, approving] = useActionState<AdminActionState, FormData>(
     approveTenantAction,
     undefined,
@@ -19,6 +27,11 @@ export function TenantReviewActions({ tenantId, feePaid }: { tenantId: string; f
 
   return (
     <div className="flex flex-col gap-4">
+      {!identityVerified && (
+        <p className="text-sm text-red-600 dark:text-red-400">
+          Identity not verified — approval is blocked until the tenant completes ID + selfie verification.
+        </p>
+      )}
       {!feePaid && (
         <p className="text-sm text-amber-700 dark:text-amber-400">
           Heads up: the application fee isn’t paid yet.
@@ -32,7 +45,7 @@ export function TenantReviewActions({ tenantId, feePaid }: { tenantId: string; f
             {approveState.error}
           </span>
         )}
-        <Button type="submit" disabled={approving} className="w-fit disabled:opacity-60">
+        <Button type="submit" disabled={approving || !identityVerified} className="w-fit disabled:opacity-60">
           {approving ? 'Approving…' : 'Approve application'}
         </Button>
       </form>

@@ -12,7 +12,7 @@ import {
   getPropertyById,
 } from '@/lib/properties'
 import { updatePartner, deletePartner, findPartnerById } from '@/lib/users'
-import { approveTenant, rejectTenant, placeTenant } from '@/lib/tenants'
+import { approveTenant, rejectTenant, placeTenant, getTenantById } from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
 import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
 import { getStripe } from '@/lib/stripe'
@@ -254,6 +254,14 @@ export async function approveTenantAction(_prev: AdminActionState, formData: For
   await requireRole('admin', '/admin/login')
   const id = String(formData.get('id') ?? '')
   if (!id) return { error: 'Missing tenant id.' }
+
+  const tenant = await getTenantById(id)
+  if (!tenant) return { error: 'Tenant not found.' }
+  // Fraud prevention: identity must be verified before approval.
+  if (!tenant.identityVerified) {
+    return { error: 'Tenant must complete identity verification (ID + selfie) before approval.' }
+  }
+
   const ok = await approveTenant(id)
   if (!ok) return { error: 'Tenant not found.' }
   revalidatePath('/admin/tenants')
