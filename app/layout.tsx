@@ -1,4 +1,4 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 import { Main } from '@/components/elements/main'
@@ -12,6 +12,23 @@ export const metadata: Metadata = {
   },
   description:
     'edynsgate is a life systems company building housing, education, sustainability, and equality as one connected system for property partners and tenants.',
+  applicationName: 'edynsgate',
+  // iOS "Add to Home Screen": run standalone with a clean title + status bar.
+  appleWebApp: {
+    capable: true,
+    title: 'edynsgate',
+    statusBarStyle: 'default',
+  },
+}
+
+// Brand the mobile browser chrome and declare light/dark support. We do not
+// disable pinch-zoom — keeping the default scale is an accessibility win.
+export const viewport: Viewport = {
+  colorScheme: 'light dark',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f1efe7' },
+    { media: '(prefers-color-scheme: dark)', color: '#21201a' },
+  ],
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
