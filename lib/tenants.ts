@@ -88,6 +88,7 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
   await col.createIndex({ userId: 1 }, { unique: true })
   await col.createIndex({ status: 1 })
   await col.createIndex({ 'fee.stripeSessionId': 1 })
+  await col.createIndex({ 'billing.stripeSubscriptionId': 1 })
   return col
 }
 
@@ -204,6 +205,15 @@ export async function savePlaidVerification(
 export async function setBilling(userId: string, billing: Billing): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: { billing, updatedAt: new Date() } })
+}
+
+/** Update rent billing status from a Stripe subscription/invoice webhook. */
+export async function setBillingStatusBySubscription(subscriptionId: string, status: BillingStatus): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { 'billing.stripeSubscriptionId': subscriptionId },
+    { $set: { 'billing.status': status, updatedAt: new Date() } },
+  )
 }
 
 export async function setIdentitySession(userId: string, sessionId: string): Promise<void> {
