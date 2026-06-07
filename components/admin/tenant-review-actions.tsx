@@ -33,8 +33,8 @@ export function TenantReviewActions({
         </p>
       )}
       {!feePaid && (
-        <p className="text-sm text-amber-700 dark:text-amber-400">
-          Heads up: the application fee isn’t paid yet.
+        <p className="text-sm text-red-600 dark:text-red-400">
+          Application fee not paid — approval is blocked until the $25 fee is paid.
         </p>
       )}
 
@@ -45,7 +45,7 @@ export function TenantReviewActions({
             {approveState.error}
           </span>
         )}
-        <Button type="submit" disabled={approving || !identityVerified} className="w-fit disabled:opacity-60">
+        <Button type="submit" disabled={approving || !identityVerified || !feePaid} className="w-fit disabled:opacity-60">
           {approving ? 'Approving…' : 'Approve application'}
         </Button>
       </form>

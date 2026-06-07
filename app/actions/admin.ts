@@ -261,6 +261,10 @@ export async function approveTenantAction(_prev: AdminActionState, formData: For
   if (!tenant.identityVerified) {
     return { error: 'Tenant must complete identity verification (ID + selfie) before approval.' }
   }
+  // The application fee must be paid before approval.
+  if (tenant.fee.status !== 'paid') {
+    return { error: 'The $25 application fee must be paid before approval.' }
+  }
 
   const ok = await approveTenant(id)
   if (!ok) return { error: 'Tenant not found.' }
