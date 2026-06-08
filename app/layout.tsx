@@ -31,6 +31,27 @@ export const viewport: Viewport = {
   ],
 }
 
+// Organization structured data: positions edynsgate as a program of VA Corp and
+// cross-references the sibling program sites so search engines see one network.
+const orgJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'Edynsgate',
+  url: 'https://www.edynsgate.com',
+  parentOrganization: {
+    '@type': 'NGO',
+    name: 'VA Corp',
+    url: 'https://www.thevacorp.com',
+  },
+  sameAs: [
+    'https://www.thevacorp.com',
+    'https://homeschool-plus.com',
+    'https://rallyup.us',
+    'https://thegooddeed.net',
+    'https://spiritofsanta.com',
+  ],
+}
+
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
@@ -43,6 +64,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap"
           rel="stylesheet"
         />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(orgJsonLd) }} />
       </head>
       <body className="font-sans text-olive-950 dark:text-white">
         <Navbar />

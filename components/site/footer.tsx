@@ -2,7 +2,10 @@ import { Container } from '@/components/elements/container'
 import { Link } from '@/components/elements/link'
 import { Logo } from './logo'
 
-const groups = [
+type FooterLink = { href: string; label: string; external?: boolean }
+type FooterGroup = { title: string; links: FooterLink[] }
+
+const groups: FooterGroup[] = [
   {
     title: 'Platform',
     links: [
@@ -21,6 +24,16 @@ const groups = [
     ],
   },
   {
+    // Sister programs across the VA Corp network — descriptive, dofollow links.
+    title: 'Sister programs',
+    links: [
+      { href: 'https://homeschool-plus.com', label: 'Homeschool+ — Education', external: true },
+      { href: 'https://rallyup.us', label: 'RallyUp — Healthcare', external: true },
+      { href: 'https://thegooddeed.net', label: 'The Good Deed — Youth Leadership', external: true },
+      { href: 'https://spiritofsanta.com', label: 'Spirit of Santa — Positive Behavior', external: true },
+    ],
+  },
+  {
     title: 'Staff',
     links: [{ href: '/admin/login', label: 'Admin' }],
   },
@@ -35,6 +48,18 @@ export function Footer() {
           <p className="max-w-xs text-sm/6 text-olive-700 dark:text-olive-400">
             A life systems company building housing, education, sustainability, and equality as one connected system.
           </p>
+          <p className="max-w-xs text-sm/6 text-olive-700 dark:text-olive-400">
+            A{' '}
+            <Link
+              href="https://www.thevacorp.com"
+              target="_blank"
+              rel="noopener"
+              className="font-medium text-olive-950 underline dark:text-white"
+            >
+              VA Corp
+            </Link>{' '}
+            program — advancing equality &amp; sustainability in housing, education, and healthcare.
+          </p>
         </div>
         <div className="grid grid-cols-2 gap-10 sm:grid-cols-3">
           {groups.map((group) => (
@@ -45,6 +70,7 @@ export function Footer() {
                   key={`${link.href}-${i}`}
                   href={link.href}
                   className="text-sm/6 font-normal text-olive-700 dark:text-olive-400"
+                  {...(link.external ? { target: '_blank', rel: 'noopener' } : {})}
                 >
                   {link.label}
                 </Link>
