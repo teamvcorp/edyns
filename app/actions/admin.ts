@@ -12,10 +12,18 @@ import {
   getPropertyById,
 } from '@/lib/properties'
 import { updatePartner, deletePartner, findPartnerById } from '@/lib/users'
-import { approveTenant, rejectTenant, placeTenant, getTenantById } from '@/lib/tenants'
+import {
+  approveTenant,
+  rejectTenant,
+  placeTenant,
+  getTenantById,
+  setBilling,
+  type BillingFrequency,
+} from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
 import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
-import { getStripe } from '@/lib/stripe'
+import { getStripe, withProcessingFee } from '@/lib/stripe'
+import { sendApprovalEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 
 export type AdminActionState = { error?: string } | undefined
@@ -268,6 +276,15 @@ export async function approveTenantAction(_prev: AdminActionState, formData: For
 
   const ok = await approveTenant(id)
   if (!ok) return { error: 'Tenant not found.' }
+
+  // Remind the tenant to finish income verification (Plaid or paystub) — the
+  // last step before we set up rent collection. Don't fail approval on email.
+  try {
+    await sendApprovalEmail({ to: tenant.email, name: tenant.name })
+  } catch {
+    /* email is best-effort */
+  }
+
   revalidatePath('/admin/tenants')
   revalidatePath(`/admin/tenants/${id}`)
   return undefined
@@ -282,6 +299,94 @@ export async function rejectTenantAction(_prev: AdminActionState, formData: Form
   if (!ok) return { error: 'Tenant not found.' }
   revalidatePath('/admin/tenants')
   revalidatePath(`/admin/tenants/${id}`)
+  return undefined
+}
+
+// ---- Rent collection setup (admin-driven, after income is verified) ----
+
+const RENT_INTERVALS: Record<BillingFrequency, { interval: 'week' | 'month'; interval_count: number }> = {
+  weekly: { interval: 'week', interval_count: 1 },
+  biweekly: { interval: 'week', interval_count: 2 },
+  monthly: { interval: 'month', interval_count: 1 },
+}
+
+/**
+ * Set up recurring rent for an approved tenant: the admin enters the 40% amount,
+ * the draft frequency, and the first draft date (after reviewing Plaid income or
+ * the uploaded paystub). Creates a Stripe subscription anchored to the first draft
+ * date; the base amount is grossed up so the tenant covers Stripe's processing fee.
+ */
+export async function startTenantBillingAction(_prev: AdminActionState, formData: FormData): Promise<AdminActionState> {
+  await requireRole('admin', '/admin/login')
+
+  const id = String(formData.get('id') ?? '')
+  const baseAmount = Number(String(formData.get('amount') ?? '').trim())
+  const frequency = String(formData.get('frequency') ?? '') as BillingFrequency
+  const firstDraft = String(formData.get('firstDraft') ?? '').trim()
+
+  if (!id) return { error: 'Missing tenant id.' }
+  if (!RENT_INTERVALS[frequency]) return { error: 'Choose a draft frequency.' }
+  if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
+    return { error: 'Enter the recurring amount (40% of pay).' }
+  }
+  const draftDate = new Date(`${firstDraft}T12:00:00`)
+  if (Number.isNaN(draftDate.getTime())) return { error: 'Choose the first draft date.' }
+  const firstDraftEpoch = Math.floor(draftDate.getTime() / 1000)
+  if (firstDraftEpoch <= Math.floor(Date.now() / 1000)) {
+    return { error: 'The first draft date must be in the future.' }
+  }
+
+  const tenant = await getTenantById(id)
+  if (!tenant) return { error: 'Tenant not found.' }
+  if (tenant.status !== 'approved') return { error: 'Approve the tenant before setting up rent.' }
+  if (!tenant.stripeCustomerId || !tenant.defaultPaymentMethodId) {
+    return { error: 'Tenant has no saved payment method (application fee must be paid first).' }
+  }
+  if (tenant.billing?.status === 'active') return { error: 'Rent collection is already active.' }
+
+  const baseAmountCents = Math.round(baseAmount * 100)
+  const amountCents = withProcessingFee(baseAmountCents)
+
+  let subscriptionId: string
+  let subActive: boolean
+  try {
+    const stripe = getStripe()
+    const product = await stripe.products.create({
+      name: 'edynsgate rent (Effort Exchange)',
+      metadata: { tenantId: id },
+    })
+    const price = await stripe.prices.create({
+      currency: 'usd',
+      unit_amount: amountCents,
+      recurring: RENT_INTERVALS[frequency],
+      product: product.id,
+    })
+    const subscription = await stripe.subscriptions.create({
+      customer: tenant.stripeCustomerId,
+      items: [{ price: price.id }],
+      default_payment_method: tenant.defaultPaymentMethodId,
+      trial_end: firstDraftEpoch, // first draft happens on this date, then recurs
+      metadata: { tenantId: id },
+    })
+    subscriptionId = subscription.id
+    subActive = subscription.status === 'active' || subscription.status === 'trialing'
+  } catch {
+    return { error: 'Stripe could not start rent collection. Check the date and the tenant’s payment method.' }
+  }
+
+  await setBilling(tenant.userId, {
+    amountCents,
+    baseAmountCents,
+    frequency,
+    stripeSubscriptionId: subscriptionId,
+    status: subActive ? 'active' : 'past_due',
+    firstDraftAt: draftDate,
+    startedAt: new Date(),
+  })
+
+  revalidatePath('/admin/tenants')
+  revalidatePath(`/admin/tenants/${id}`)
+  revalidatePath('/tenants')
   return undefined
 }
 

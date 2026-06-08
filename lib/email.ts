@@ -48,6 +48,29 @@ export async function sendCredentialsEmail(input: {
   await sendEmail({ to: input.to, subject: 'Your edynsgate account', html })
 }
 
+/**
+ * Approval email: the tenant is approved and must finish income verification
+ * (connect a bank via Plaid OR upload their most recent paystub) before we set
+ * up rent collection.
+ */
+export async function sendApprovalEmail(input: { to: string; name: string }): Promise<void> {
+  const portalUrl = `${baseUrl}/tenants`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">You’re approved, ${escapeHtml(input.name)} 🎉</h2>
+      <p>Welcome to edynsgate. There’s <strong>one last step</strong> before you can move in: verify your income.</p>
+      <p>Sign in to your tenant portal and either:</p>
+      <ul>
+        <li><strong>Connect your bank with Plaid</strong> (fastest), or</li>
+        <li><strong>Upload your most recent paystub</strong>.</li>
+      </ul>
+      <p>Once we’ve confirmed your income, our team will set up your rent collection.</p>
+      <p><a href="${portalUrl}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Finish income verification</a></p>
+    </div>`
+
+  await sendEmail({ to: input.to, subject: 'You’re approved — one last step', html })
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }

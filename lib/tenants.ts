@@ -9,25 +9,36 @@ export interface Person {
   dob: string // ISO date string (yyyy-mm-dd)
 }
 
+export type VerificationMethod = 'plaid' | 'manual'
+
 export interface Employment {
   employer: string
   jobTitle: string
   monthlyIncome: number
   employerPhone?: string
-  /** Set once the bank is connected through Plaid. */
+  /** Set once income is confirmed (bank connected through Plaid). */
   verified?: boolean
+  /** How income was evidenced: Plaid bank connection or a manually uploaded paystub. */
+  verificationMethod?: VerificationMethod
   /** Monthly income derived from Plaid Bank Income, when available. */
   verifiedMonthlyIncome?: number
   verifiedAt?: Date
 }
 
 export type BillingStatus = 'none' | 'active' | 'past_due' | 'canceled'
+export type BillingFrequency = 'weekly' | 'biweekly' | 'monthly'
 
 export interface Billing {
-  /** 40% of (verified or reported) monthly income, in cents. */
-  monthlyAmountCents: number
+  /** Per-draft charge in cents (the 40% grossed up so the tenant covers Stripe's fee). */
+  amountCents: number
+  /** The base 40% amount (before processing fee) the admin entered, in cents. */
+  baseAmountCents: number
+  /** How often rent drafts. */
+  frequency: BillingFrequency
   stripeSubscriptionId: string
   status: BillingStatus
+  /** When the first draft occurs (Stripe trial_end / billing anchor). */
+  firstDraftAt: Date
   startedAt: Date
 }
 
@@ -66,6 +77,8 @@ export interface TenantDoc {
   identityVerified?: boolean
   identityVerifiedAt?: Date
   idNumberLast4?: string
+  /** Manually uploaded paystub — alternative to Plaid for income verification. */
+  paystub?: { url: string; uploadedAt: Date }
   /** Recurring rent collection (40% of income) via Stripe. */
   billing?: Billing
   /** Tenants start at tier 0 on approval and move up as they relocate. */
@@ -195,11 +208,27 @@ export async function savePlaidVerification(
     plaidAccessTokenEnc: input.accessTokenEnc,
     plaidItemId: input.itemId,
     'employment.verified': true,
+    'employment.verificationMethod': 'plaid',
     'employment.verifiedAt': new Date(),
     updatedAt: new Date(),
   }
   if (input.verifiedMonthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
+}
+
+/** Save a manually uploaded paystub (alternative to Plaid). Income is confirmed by the admin. */
+export async function setPaystub(userId: string, url: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { userId: new ObjectId(userId) },
+    {
+      $set: {
+        paystub: { url, uploadedAt: new Date() },
+        'employment.verificationMethod': 'manual',
+        updatedAt: new Date(),
+      },
+    },
+  )
 }
 
 export async function setBilling(userId: string, billing: Billing): Promise<void> {

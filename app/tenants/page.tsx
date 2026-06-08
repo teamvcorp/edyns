@@ -4,11 +4,11 @@ import { getTenantByUserId } from '@/lib/tenants'
 import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment } from '@/app/actions/tenants'
-import { startRentCollection } from '@/app/actions/billing'
-import { COLLECTION_RATE, withProcessingFee } from '@/lib/stripe'
+import { COLLECTION_RATE } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
+import { PaystubUploader } from '@/components/tenants/paystub-uploader'
 import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
@@ -30,17 +30,12 @@ const feeCopy = {
   paid: 'Paid',
 } as const
 
-const billingBanner: Record<string, string> = {
-  started: 'Rent collection started.',
-  'no-payment-method': 'Add a payment method (pay your application fee) before starting rent collection.',
-  'no-income': 'We need your income on file before starting rent collection.',
-  'not-approved': 'Your application must be approved first.',
-}
+const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
 
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ billing?: string; error?: string; identity?: string }>
+  searchParams: Promise<{ identity?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -64,11 +59,14 @@ export default async function TenantPortalPage({
   const householdSize = 1 + tenant.adults.length + tenant.children.length
 
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
-  const billableIncome = verifiedIncome ?? tenant.employment.monthlyIncome
-  const monthlyCollection = billableIncome * COLLECTION_RATE
-  const monthlyChargeTotal = withProcessingFee(Math.round(monthlyCollection * 100)) / 100
   const billing = tenant.billing
-  const bannerMsg = sp.billing === 'started' ? billingBanner.started : sp.error ? billingBanner[sp.error] : undefined
+  const incomeStatus = tenant.employment.verified
+    ? 'Verified'
+    : tenant.paystub
+      ? 'Paystub uploaded'
+      : tenant.status === 'approved'
+        ? 'Action needed'
+        : 'After approval'
 
   // Move-in requests, joined with property address for display.
   const requests = await listRequestsByTenant(tenant.id)
@@ -78,12 +76,6 @@ export default async function TenantPortalPage({
 
   return (
     <PortalShell eyebrow="Tenant portal" title={`Welcome, ${session.name ?? 'tenant'}`}>
-      {bannerMsg && (
-        <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
-          {bannerMsg}
-        </p>
-      )}
-
       {/* Application status */}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -138,40 +130,49 @@ export default async function TenantPortalPage({
             <dd className="font-display text-3xl text-olive-950 dark:text-white">{tenant.children.length}</dd>
           </div>
           <div>
-            <dt className="text-sm text-olive-600 dark:text-olive-500">Employment</dt>
-            <dd className="text-sm text-olive-950 dark:text-white">
-              {tenant.employment.verified ? 'Verified' : 'Pending Plaid check'}
-            </dd>
+            <dt className="text-sm text-olive-600 dark:text-olive-500">Income</dt>
+            <dd className="text-sm text-olive-950 dark:text-white">{incomeStatus}</dd>
           </div>
         </dl>
       </Card>
 
-      {/* Employment & income verification */}
+      {/* Employment & income verification — unlocks after approval */}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Employment & income</h3>
-          <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">
-            {tenant.employment.verified ? 'Verified' : 'Not verified'}
-          </span>
+          <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">{incomeStatus}</span>
         </div>
-        {tenant.employment.verified ? (
+        {tenant.status !== 'approved' ? (
+          <Text className="text-sm/6">
+            <p>Income verification unlocks once your application is approved. We’ll email you when it’s time.</p>
+          </Text>
+        ) : tenant.employment.verified ? (
           <Text className="text-sm/6">
             <p>
               Bank connected via Plaid.{' '}
-              {verifiedIncome
-                ? `Verified income ${formatCurrency(verifiedIncome)}/mo.`
-                : 'Income estimate pending.'}
+              {verifiedIncome ? `Verified income ${formatCurrency(verifiedIncome)}/mo.` : 'Income estimate pending.'}
             </p>
           </Text>
         ) : (
           <>
             <Text className="text-sm/6">
               <p>
-                Connect your bank through Plaid to verify your employment income. Any Plaid verification fees are covered
-                by you.
+                One last step: verify your income so we can set up your rent. Connect your bank with Plaid (fastest), or
+                upload your most recent paystub. You cover any Plaid/Stripe fees.
               </p>
             </Text>
-            <PlaidVerifyButton />
+            <div className="flex flex-col gap-3">
+              <PlaidVerifyButton />
+              <span className="text-xs text-olive-600 dark:text-olive-500">
+                or upload your most recent paystub (PDF or image)
+              </span>
+              <PaystubUploader currentUrl={tenant.paystub?.url} />
+            </div>
+            {tenant.paystub && (
+              <p className="text-sm text-olive-700 dark:text-olive-300">
+                Paystub received — our team will review it and set up your rent collection.
+              </p>
+            )}
           </>
         )}
       </Card>
@@ -201,7 +202,7 @@ export default async function TenantPortalPage({
         )}
       </Card>
 
-      {/* Rent collection (40% of income) */}
+      {/* Rent collection (set up by our team after income is verified) */}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent collection</h3>
@@ -212,29 +213,21 @@ export default async function TenantPortalPage({
         {billing ? (
           <Text className="text-sm/6">
             <p>
-              Collecting <strong>{formatCurrency(billing.monthlyAmountCents / 100)}/mo</strong> to your payment method —{' '}
-              {Math.round(COLLECTION_RATE * 100)}% of your income ({formatCurrency(monthlyCollection)}) plus Stripe
-              processing, which you cover.
+              Drafting <strong>{formatCurrency(billing.amountCents / 100)} {frequencyLabel[billing.frequency]}</strong>{' '}
+              from your payment method, starting {new Date(billing.firstDraftAt).toLocaleDateString()}. This is{' '}
+              {Math.round(COLLECTION_RATE * 100)}% of your income plus Stripe processing, which you cover.
             </p>
           </Text>
         ) : tenant.status === 'approved' ? (
-          <>
-            <Text className="text-sm/6">
-              <p>
-                We collect {Math.round(COLLECTION_RATE * 100)}% of your monthly income as rent —{' '}
-                <strong>{formatCurrency(monthlyCollection)}/mo</strong> based on{' '}
-                {verifiedIncome ? 'your verified income' : 'your reported income'}. You’re charged about{' '}
-                <strong>{formatCurrency(monthlyChargeTotal)}/mo</strong>, which includes the Stripe processing fee (you
-                cover all Stripe &amp; Plaid fees).
-              </p>
-            </Text>
-            <form action={startRentCollection}>
-              <Button type="submit">Start rent collection</Button>
-            </form>
-          </>
+          <Text className="text-sm/6">
+            <p>
+              Once your income is verified, our team sets up your rent collection — the amount ({Math.round(COLLECTION_RATE * 100)}% of
+              your pay), how often it drafts, and the first draft date.
+            </p>
+          </Text>
         ) : (
           <Text className="text-sm/6">
-            <p>Rent collection begins once your application is approved.</p>
+            <p>Rent collection begins after your application is approved and your income is verified.</p>
           </Text>
         )}
       </Card>

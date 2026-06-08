@@ -8,12 +8,14 @@ import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
 import { Link } from '@/components/elements/link'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
+import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { formatAddress, formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Review application' }
 
 const feeLabel = { unpaid: 'Unpaid', processing: 'Processing', paid: 'Paid' } as const
 const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' } as const
+const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -89,11 +91,37 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
             <Row label="Job title" value={t.employment.jobTitle} />
             <Row label="Reported income" value={formatCurrency(t.employment.monthlyIncome)} />
             <Row label="Employer phone" value={t.employment.employerPhone ?? '—'} />
-            <Row label="Plaid verification" value={t.employment.verified ? 'Verified' : 'Not yet verified'} />
+            <Row
+              label="Income verification"
+              value={
+                t.employment.verified
+                  ? 'Verified via Plaid'
+                  : t.paystub
+                    ? 'Paystub uploaded'
+                    : 'Not yet verified'
+              }
+            />
             <Row
               label="Verified income"
               value={t.employment.verifiedMonthlyIncome ? formatCurrency(t.employment.verifiedMonthlyIncome) : '—'}
             />
+            {t.paystub && (
+              <div className="sm:col-span-2">
+                <Row
+                  label="Uploaded paystub"
+                  value={
+                    <a
+                      href={t.paystub.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-olive-700 underline dark:text-olive-300"
+                    >
+                      View paystub
+                    </a>
+                  }
+                />
+              </div>
+            )}
           </dl>
         </Card>
 
@@ -105,7 +133,11 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
             <Row label="Payment method" value={t.defaultPaymentMethodId ? 'On file' : '—'} />
             <Row
               label="Rent collection"
-              value={t.billing ? `${formatCurrency(t.billing.monthlyAmountCents / 100)}/mo · ${t.billing.status}` : 'Not started'}
+              value={
+                t.billing
+                  ? `${formatCurrency(t.billing.amountCents / 100)} ${frequencyLabel[t.billing.frequency]} · ${t.billing.status}`
+                  : 'Not started'
+              }
             />
             <Row
               label="Identity (ID + selfie)"
@@ -125,6 +157,41 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
               feePaid={t.fee.status === 'paid'}
               identityVerified={Boolean(t.identityVerified)}
             />
+          </Card>
+        )}
+
+        {t.status === 'approved' && (
+          <Card className="flex flex-col gap-4">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent collection</h3>
+            {t.billing ? (
+              <dl className="grid gap-4 sm:grid-cols-3">
+                <Row label="Amount" value={`${formatCurrency(t.billing.amountCents / 100)} ${frequencyLabel[t.billing.frequency]}`} />
+                <Row label="Base (40%)" value={formatCurrency(t.billing.baseAmountCents / 100)} />
+                <Row label="Status" value={t.billing.status} />
+                <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
+              </dl>
+            ) : !t.employment.verified && !t.paystub ? (
+              <p className="text-sm text-olive-600 dark:text-olive-500">
+                Waiting on income verification — the tenant must connect their bank via Plaid or upload a paystub before
+                you can set up rent collection.
+              </p>
+            ) : !t.defaultPaymentMethodId ? (
+              <p className="text-sm text-red-600 dark:text-red-400">
+                No saved payment method on file. The application fee must be paid (which saves the method) before rent can
+                be drafted.
+              </p>
+            ) : (
+              <>
+                <p className="text-sm text-olive-600 dark:text-olive-500">
+                  Income on file{' '}
+                  {t.employment.verified
+                    ? `(Plaid${t.employment.verifiedMonthlyIncome ? ` · ${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo verified` : ''})`
+                    : '(paystub uploaded — review it above)'}
+                  . Enter the recurring 40% amount, frequency, and first draft date.
+                </p>
+                <TenantBillingForm tenantId={t.id} />
+              </>
+            )}
           </Card>
         )}
       </Container>

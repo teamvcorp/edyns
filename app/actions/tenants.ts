@@ -1,6 +1,7 @@
 'use server'
 
 import { redirect } from 'next/navigation'
+import { revalidatePath } from 'next/cache'
 import Stripe from 'stripe'
 import { createSession } from '@/lib/session'
 import { requireRole } from '@/lib/dal'
@@ -10,6 +11,7 @@ import {
   getTenantByUserId,
   attachStripeCustomer,
   setFeeSession,
+  setPaystub,
   type Person,
 } from '@/lib/tenants'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
@@ -179,4 +181,19 @@ export async function resumeApplicationPayment(): Promise<void> {
 
   const url = await startFeeCheckout({ userId: session.sub, email: tenant!.email, customerId })
   redirect(url)
+}
+
+/**
+ * Save a manually uploaded paystub as an alternative to Plaid income verification.
+ * Only available after the application is approved (the income-verification step).
+ */
+export async function savePaystub(url: string): Promise<{ error?: string } | void> {
+  const session = await requireRole('tenant', '/tenants/login')
+  const tenant = await getTenantByUserId(session.sub)
+  if (!tenant) return { error: 'No application on file.' }
+  if (tenant.status !== 'approved') return { error: 'Income verification unlocks once your application is approved.' }
+  if (!/^https?:\/\/\S+$/.test(url)) return { error: 'That file could not be saved. Please try again.' }
+
+  await setPaystub(session.sub, url)
+  revalidatePath('/tenants')
 }
