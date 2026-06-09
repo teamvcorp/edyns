@@ -84,7 +84,8 @@ export async function enrollPartner(_prev: EnrollState, formData: FormData): Pro
       },
       taxId: values.taxId,
     })
-  } catch {
+  } catch (err) {
+    console.error('enrollPartner: failed to register partner', err)
     return { message: 'Something went wrong creating your account. Please try again.', values }
   }
 

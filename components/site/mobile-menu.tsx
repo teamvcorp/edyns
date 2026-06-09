@@ -3,9 +3,16 @@
 import { useState } from 'react'
 import { Link } from '@/components/elements/link'
 import { ButtonLink, PlainButtonLink } from '@/components/elements/button'
+import { LogoutButton } from '@/components/auth/logout-button'
 
 /** Collapsible navigation for small screens (the desktop nav is hidden < md). */
-export function MobileMenu({ links }: { links: { href: string; label: string }[] }) {
+export function MobileMenu({
+  links,
+  portal,
+}: {
+  links: { href: string; label: string }[]
+  portal: { href: string; label: string } | null
+}) {
   const [open, setOpen] = useState(false)
   const close = () => setOpen(false)
 
@@ -45,12 +52,23 @@ export function MobileMenu({ links }: { links: { href: string; label: string }[]
               </Link>
             ))}
             <div className="mt-2 flex flex-col gap-2 border-t border-olive-950/10 pt-4 pb-2 dark:border-white/10">
-              <PlainButtonLink href="/tenants/login" onClick={close} size="lg" className="w-full">
-                Tenant log in
-              </PlainButtonLink>
-              <ButtonLink href="/partners/login" onClick={close} size="lg" className="w-full">
-                Partner log in
-              </ButtonLink>
+              {portal ? (
+                <>
+                  <ButtonLink href={portal.href} onClick={close} size="lg" className="w-full">
+                    {portal.label}
+                  </ButtonLink>
+                  <LogoutButton size="lg" className="w-full" />
+                </>
+              ) : (
+                <>
+                  <PlainButtonLink href="/tenants/login" onClick={close} size="lg" className="w-full">
+                    Tenant log in
+                  </PlainButtonLink>
+                  <ButtonLink href="/partners/login" onClick={close} size="lg" className="w-full">
+                    Partner log in
+                  </ButtonLink>
+                </>
+              )}
             </div>
           </nav>
         </div>

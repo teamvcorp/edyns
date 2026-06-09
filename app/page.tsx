@@ -12,6 +12,7 @@ import { SunIcon } from '@/components/icons/sun-icon'
 import { HeartIcon } from '@/components/icons/heart-icon'
 import { KeyIcon } from '@/components/icons/key-icon'
 import { ArrowNarrowRightIcon } from '@/components/icons/arrow-narrow-right-icon'
+import { SecretAdmin } from '@/components/site/secret-admin'
 
 const pillars = [
   {
@@ -39,6 +40,7 @@ const pillars = [
 export default function Page() {
   return (
     <>
+      <SecretAdmin />
       {/* Hero */}
       <section id="mission" className="py-20 sm:py-28">
         <Container className="flex max-w-4xl flex-col items-start gap-6">

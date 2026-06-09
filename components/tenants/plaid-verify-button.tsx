@@ -16,7 +16,7 @@ export function PlaidVerifyButton() {
     fetch('/api/tenants/plaid/link-token', { method: 'POST' })
       .then((r) => r.json())
       .then((d) => {
-        if (!d.link_token) return setError('Could not start verification.')
+        if (!d.link_token) return setError(d.error ?? 'Could not start verification.')
         setToken(d.link_token)
         // Persist so an OAuth bank redirect can resume on /tenants/plaid-oauth.
         try {

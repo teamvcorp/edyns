@@ -20,7 +20,15 @@ export async function POST(request: Request): Promise<NextResponse> {
           throw new Error('Unauthorized')
         }
         return {
-          allowedContentTypes: ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'],
+          allowedContentTypes: [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+            'image/webp',
+            'image/gif',
+            'image/heic',
+            'image/heif',
+          ],
           maximumSizeInBytes: 10 * 1024 * 1024, // 10MB
           addRandomSuffix: true,
         }
@@ -31,6 +39,8 @@ export async function POST(request: Request): Promise<NextResponse> {
     })
     return NextResponse.json(json)
   } catch (error) {
+    // Surface the real reason in Vercel logs (the client only sees a generic 400).
+    console.error('[tenants/upload] handleUpload failed:', (error as Error).message)
     return NextResponse.json({ error: (error as Error).message }, { status: 400 })
   }
 }

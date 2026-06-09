@@ -33,10 +33,6 @@ const groups: FooterGroup[] = [
       { href: 'https://spiritofsanta.com', label: 'Spirit of Santa — Positive Behavior', external: true },
     ],
   },
-  {
-    title: 'Staff',
-    links: [{ href: '/admin/login', label: 'Admin' }],
-  },
 ]
 
 export function Footer() {
