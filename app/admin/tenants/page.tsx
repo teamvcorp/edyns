@@ -47,7 +47,11 @@ export default async function AdminTenantsPage({
   )
 
   return (
-    <PortalShell eyebrow="Administration" title={`Tenant applications (${tenants.length})`}>
+    <PortalShell
+      eyebrow="Administration"
+      title={`Tenant applications (${tenants.length})`}
+      breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Tenant applications' }]}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         {sp.created ? (
           <p role="status" className="text-sm text-olive-700 dark:text-olive-300">

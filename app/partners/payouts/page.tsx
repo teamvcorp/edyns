@@ -11,7 +11,7 @@ import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
 import { Card } from '@/components/elements/card'
-import { Link } from '@/components/elements/link'
+import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { Button, SoftButton } from '@/components/elements/button'
 import { ManualConnectForm } from '@/components/partners/manual-connect-form'
 import { formatCurrency } from '@/lib/format'
@@ -69,9 +69,12 @@ export default async function PartnerPayoutsPage({
     <section className="py-16">
       <Container className="flex max-w-3xl flex-col gap-8">
         <div className="flex flex-col gap-2">
+          <Breadcrumbs
+            className="mb-2"
+            items={[{ label: 'Partner portal', href: '/partners' }, { label: 'Equity & payouts' }]}
+          />
           <Eyebrow>Partner portal</Eyebrow>
           <Subheading className="text-3xl/9 sm:text-4xl/12">Equity & payouts</Subheading>
-          <Link href="/partners">← Back to portal</Link>
         </div>
 
         {bannerInfo && (

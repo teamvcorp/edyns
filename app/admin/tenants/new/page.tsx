@@ -5,7 +5,7 @@ import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
-import { Link } from '@/components/elements/link'
+import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { TenantEnrollForm } from '@/components/auth/tenant-enroll-form'
 import { createTenantByAdmin } from '@/app/actions/admin-create'
 
@@ -18,6 +18,14 @@ export default async function AdminNewTenantPage() {
     <section className="py-16">
       <Container className="flex max-w-2xl flex-col gap-8">
         <div className="flex flex-col gap-2">
+          <Breadcrumbs
+            className="mb-2"
+            items={[
+              { label: 'Admin dashboard', href: '/admin' },
+              { label: 'Tenant applications', href: '/admin/tenants' },
+              { label: 'Add tenant' },
+            ]}
+          />
           <Eyebrow>Administration</Eyebrow>
           <Subheading className="text-3xl/9 sm:text-4xl/12">Add a tenant</Subheading>
           <Text className="text-pretty">
@@ -26,7 +34,6 @@ export default async function AdminNewTenantPage() {
               to pay the $25 application fee.
             </p>
           </Text>
-          <Link href="/admin/tenants">← Back to tenant applications</Link>
         </div>
 
         <Card className="p-8 sm:p-10">

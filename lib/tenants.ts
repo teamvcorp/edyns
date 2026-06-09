@@ -102,15 +102,24 @@ export interface TenantDoc {
   /** Tenants start at tier 0 on approval and move up as they relocate. */
   currentTier?: number
   currentPropertyId?: ObjectId
+  /**
+   * Snapshot of the placement the tenant had immediately before their current
+   * one, captured when a move-in is approved. Lets an admin reverse/evict an
+   * approved move-in and restore the tenant's prior home address and tier.
+   */
+  priorAddress?: Address
+  priorTier?: number
+  priorPropertyId?: ObjectId
   createdAt: Date
   updatedAt: Date
   approvedAt?: Date
 }
 
-export type Tenant = Omit<TenantDoc, '_id' | 'userId' | 'currentPropertyId'> & {
+export type Tenant = Omit<TenantDoc, '_id' | 'userId' | 'currentPropertyId' | 'priorPropertyId'> & {
   id: string
   userId: string
   currentPropertyId?: string
+  priorPropertyId?: string
 }
 
 async function tenantsCollection(): Promise<Collection<TenantDoc>> {
@@ -126,12 +135,13 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
 }
 
 function toTenant(doc: TenantDoc): Tenant {
-  const { _id, userId, currentPropertyId, ...rest } = doc
+  const { _id, userId, currentPropertyId, priorPropertyId, ...rest } = doc
   return {
     ...rest,
     id: _id.toString(),
     userId: userId.toString(),
     currentPropertyId: currentPropertyId?.toString(),
+    priorPropertyId: priorPropertyId?.toString(),
   }
 }
 
@@ -470,15 +480,59 @@ export async function approveTenant(id: string): Promise<boolean> {
   return res.matchedCount === 1
 }
 
-/** Record an approved move-in: place the tenant at the property's tier. */
-export async function placeTenant(tenantId: string, propertyId: string, tier: number): Promise<boolean> {
+/**
+ * Record an approved move-in: place the tenant at the property's tier and set
+ * their mailing address to the new home. The placement they had beforehand is
+ * snapshotted into the `prior*` fields so the move-in can be reversed/evicted.
+ */
+export async function placeTenant(
+  tenantId: string,
+  propertyId: string,
+  tier: number,
+  address: Address,
+): Promise<boolean> {
   if (!ObjectId.isValid(tenantId) || !ObjectId.isValid(propertyId)) return false
   const col = await tenantsCollection()
-  const res = await col.updateOne(
-    { _id: new ObjectId(tenantId) },
-    { $set: { currentPropertyId: new ObjectId(propertyId), currentTier: tier, updatedAt: new Date() } },
-  )
+  const existing = await col.findOne({ _id: new ObjectId(tenantId) })
+  if (!existing) return false
+
+  const set: Record<string, unknown> = {
+    currentPropertyId: new ObjectId(propertyId),
+    currentTier: tier,
+    address,
+    priorAddress: existing.address,
+    priorTier: existing.currentTier ?? 0,
+    updatedAt: new Date(),
+  }
+  const update: Record<string, unknown> = { $set: set }
+  if (existing.currentPropertyId) set.priorPropertyId = existing.currentPropertyId
+  else update.$unset = { priorPropertyId: '' }
+
+  const res = await col.updateOne({ _id: new ObjectId(tenantId) }, update)
   return res.matchedCount === 1
+}
+
+/**
+ * Reverse/evict the tenant's current placement at `propertyId`: restore the
+ * address and tier they had before that move-in, and clear the snapshot. No-op
+ * if the tenant isn't currently placed at that property (avoids corrupting a
+ * newer placement when an older decided request is reversed).
+ */
+export async function unplaceTenant(tenantId: string, propertyId: string): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId) || !ObjectId.isValid(propertyId)) return false
+  const col = await tenantsCollection()
+  const existing = await col.findOne({ _id: new ObjectId(tenantId) })
+  if (!existing || existing.currentPropertyId?.toString() !== propertyId) return false
+
+  const set: Record<string, unknown> = { currentTier: existing.priorTier ?? 0, updatedAt: new Date() }
+  if (existing.priorAddress) set.address = existing.priorAddress
+
+  const unset: Record<string, ''> = { priorAddress: '', priorTier: '', priorPropertyId: '' }
+  if (existing.priorPropertyId) set.currentPropertyId = existing.priorPropertyId
+  else unset.currentPropertyId = ''
+
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: set, $unset: unset })
+  return true
 }
 
 export async function rejectTenant(id: string, reason: string): Promise<boolean> {

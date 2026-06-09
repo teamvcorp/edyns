@@ -3,7 +3,11 @@ import 'server-only'
 import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 
-export type MoveInStatus = 'requested' | 'approved' | 'declined'
+export type MoveInStatus = 'requested' | 'approved' | 'declined' | 'reversed' | 'evicted'
+
+// Terminal states that release the tenant from the property — a new request for
+// the same property is allowed again once a placement reaches one of these.
+const INACTIVE_STATUSES: MoveInStatus[] = ['declined', 'reversed', 'evicted']
 
 export interface MoveInRequestDoc {
   _id: ObjectId
@@ -49,7 +53,7 @@ export async function hasActiveRequest(tenantId: string, propertyId: string): Pr
   const doc = await col.findOne({
     tenantId: new ObjectId(tenantId),
     propertyId: new ObjectId(propertyId),
-    status: { $ne: 'declined' },
+    status: { $nin: INACTIVE_STATUSES },
   })
   return doc !== null
 }

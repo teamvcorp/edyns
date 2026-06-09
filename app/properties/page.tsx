@@ -5,8 +5,17 @@ import { Eyebrow } from '@/components/elements/eyebrow'
 import { Heading } from '@/components/elements/heading'
 import { Text } from '@/components/elements/text'
 import { Card } from '@/components/elements/card'
+import { Link } from '@/components/elements/link'
 import { PublicPropertyCard } from '@/components/properties/public-property-card'
 import { PropertyFilters } from '@/components/properties/property-filters'
+import { getSession } from '@/lib/session'
+
+// Where each signed-in audience returns to from the public property browser.
+const dashboards: Record<'tenant' | 'partner' | 'admin', string> = {
+  tenant: '/tenants',
+  partner: '/partners',
+  admin: '/admin',
+}
 
 export const metadata: Metadata = {
   title: 'Browse properties',
@@ -29,10 +38,14 @@ export default async function PropertiesPage({
   })
   const filtered = Boolean(zip || tier)
 
+  const session = await getSession()
+  const dashboardHref = session ? dashboards[session.role] : null
+
   return (
     <section className="py-16 sm:py-20">
       <Container className="flex flex-col gap-12">
         <div className="flex max-w-2xl flex-col gap-4">
+          {dashboardHref && <Link href={dashboardHref}>← Back to dashboard</Link>}
           <Eyebrow>Available homes</Eyebrow>
           <Heading>Browse the edynsgate network.</Heading>
           <Text size="lg" className="text-pretty">

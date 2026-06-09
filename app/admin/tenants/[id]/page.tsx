@@ -6,7 +6,7 @@ import { Container } from '@/components/elements/container'
 import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
-import { Link } from '@/components/elements/link'
+import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
@@ -40,9 +40,16 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
     <section className="py-16">
       <Container className="flex max-w-3xl flex-col gap-8">
         <div className="flex flex-col gap-2">
+          <Breadcrumbs
+            className="mb-2"
+            items={[
+              { label: 'Admin dashboard', href: '/admin' },
+              { label: 'Tenant applications', href: '/admin/tenants' },
+              { label: t.name },
+            ]}
+          />
           <Eyebrow>Administration</Eyebrow>
           <Subheading className="text-3xl/9 sm:text-4xl/12">{t.name}</Subheading>
-          <Link href="/admin/tenants">← Back to tenant applications</Link>
         </div>
 
         {t.flaggedForReview && (

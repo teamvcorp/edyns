@@ -14,7 +14,11 @@ export default async function PartnerPropertiesPage() {
   const properties = await listPropertiesByPartner(session.sub)
 
   return (
-    <PortalShell eyebrow="Partner portal" title="My properties">
+    <PortalShell
+      eyebrow="Partner portal"
+      title="My properties"
+      breadcrumbs={[{ label: 'Partner portal', href: '/partners' }, { label: 'My properties' }]}
+    >
       <div className="flex items-center justify-between">
         <Text className="text-sm/6">
           <p>{properties.length} propert{properties.length === 1 ? 'y' : 'ies'}.</p>

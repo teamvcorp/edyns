@@ -42,7 +42,11 @@ export default async function AdminPayoutsPage({
   const bannerInfo = bannerKey ? banner[bannerKey] : undefined
 
   return (
-    <PortalShell eyebrow="Administration" title={`Payout requests (${requests.length})`}>
+    <PortalShell
+      eyebrow="Administration"
+      title={`Payout requests (${requests.length})`}
+      breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Payout requests' }]}
+    >
       {bannerInfo && (
         <p
           role="status"

@@ -17,7 +17,11 @@ export default async function AdminPropertiesPage() {
   const decided = all.filter((p) => p.status !== 'pending')
 
   return (
-    <PortalShell eyebrow="Administration" title="Property review">
+    <PortalShell
+      eyebrow="Administration"
+      title="Property review"
+      breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Property review' }]}
+    >
       <div className="flex flex-col gap-6">
         <Subheading className="text-2xl/8">Pending approval ({pending.length})</Subheading>
         {pending.length === 0 ? (

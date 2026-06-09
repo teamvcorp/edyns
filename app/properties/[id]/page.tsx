@@ -4,7 +4,7 @@ import { notFound } from 'next/navigation'
 import { getPropertyById } from '@/lib/properties'
 import { getSession } from '@/lib/session'
 import { getTenantByUserId } from '@/lib/tenants'
-import { listRequestsByTenant } from '@/lib/moveins'
+import { listRequestsByTenant, type MoveInStatus } from '@/lib/moveins'
 import { Container } from '@/components/elements/container'
 import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
@@ -18,11 +18,13 @@ import { tierLabel } from '@/lib/tiers'
 
 export const metadata: Metadata = { title: 'Property' }
 
-const requestStatusCopy = {
+const requestStatusCopy: Record<MoveInStatus, string> = {
   requested: 'You’ve requested to move into this home. It’s pending review.',
   approved: 'Your move-in request for this home was approved!',
   declined: 'Your move-in request for this home was declined.',
-} as const
+  reversed: 'Your move-in request for this home was reversed.',
+  evicted: 'Your tenancy at this home has ended.',
+}
 
 async function MoveInCta({ propertyId, incomeRequirement }: { propertyId: string; incomeRequirement: number }) {
   const session = await getSession()
@@ -55,7 +57,8 @@ async function MoveInCta({ propertyId, incomeRequirement }: { propertyId: string
   }
 
   const requests = await listRequestsByTenant(tenant.id)
-  const existing = requests.find((r) => r.propertyId === propertyId && r.status !== 'declined')
+  const inactive: MoveInStatus[] = ['declined', 'reversed', 'evicted']
+  const existing = requests.find((r) => r.propertyId === propertyId && !inactive.includes(r.status))
   if (existing) {
     return <Text className="text-sm/6"><p>{requestStatusCopy[existing.status]}</p></Text>
   }

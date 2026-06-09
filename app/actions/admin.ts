@@ -16,6 +16,7 @@ import {
   approveTenant,
   rejectTenant,
   placeTenant,
+  unplaceTenant,
   getTenantById,
   setBilling,
   setNextIncomeCheck,
@@ -438,13 +439,14 @@ export async function approveMoveInAction(formData: FormData): Promise<void> {
   await requireRole('admin', '/admin/login')
   const id = String(formData.get('id') ?? '')
   const req = await getRequestById(id)
-  if (req) {
+  if (req && req.status === 'requested') {
     const property = await getPropertyById(req.propertyId)
     await setRequestStatus(id, 'approved')
-    // Place the tenant at the property's tier.
-    if (property) await placeTenant(req.tenantId, req.propertyId, property.tier ?? 0)
+    // Place the tenant at the property's tier and move their address to the new home.
+    if (property) await placeTenant(req.tenantId, req.propertyId, property.tier ?? 0, property.address)
   }
   revalidatePath('/admin/move-ins')
+  revalidatePath('/tenants')
 }
 
 export async function declineMoveInAction(formData: FormData): Promise<void> {
@@ -452,6 +454,31 @@ export async function declineMoveInAction(formData: FormData): Promise<void> {
   const id = String(formData.get('id') ?? '')
   await setRequestStatus(id, 'declined')
   revalidatePath('/admin/move-ins')
+}
+
+/**
+ * Undo an approved move-in. `reverse` treats it as an admin mistake; `evict`
+ * records a tenant removal. Both release the tenant from the property and
+ * restore the address/tier they had before the move-in.
+ */
+async function undoMoveIn(formData: FormData, status: 'reversed' | 'evicted'): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '')
+  const req = await getRequestById(id)
+  if (req && req.status === 'approved') {
+    await unplaceTenant(req.tenantId, req.propertyId)
+    await setRequestStatus(id, status)
+  }
+  revalidatePath('/admin/move-ins')
+  revalidatePath('/tenants')
+}
+
+export async function reverseMoveInAction(formData: FormData): Promise<void> {
+  await undoMoveIn(formData, 'reversed')
+}
+
+export async function evictMoveInAction(formData: FormData): Promise<void> {
+  await undoMoveIn(formData, 'evicted')
 }
 
 // ---- Payout approval ----

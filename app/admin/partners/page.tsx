@@ -20,7 +20,11 @@ export default async function AdminPartnersPage({
   const [partners, counts] = await Promise.all([listPartners(), propertyCountsByPartner()])
 
   return (
-    <PortalShell eyebrow="Administration" title={`Partners (${partners.length})`}>
+    <PortalShell
+      eyebrow="Administration"
+      title={`Partners (${partners.length})`}
+      breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Partners' }]}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         {sp.created ? (
           <p role="status" className="text-sm text-olive-700 dark:text-olive-300">

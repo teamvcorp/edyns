@@ -10,6 +10,7 @@ import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
+import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { SoftButton } from '@/components/elements/button'
 import { PartnerEditForm } from '@/components/admin/partner-edit-form'
 import { StatusBadge } from '@/components/partners/status-badge'
@@ -38,9 +39,16 @@ export default async function AdminPartnerEditPage({
     <section className="py-16">
       <Container className="flex max-w-3xl flex-col gap-8">
         <div className="flex flex-col gap-2">
+          <Breadcrumbs
+            className="mb-2"
+            items={[
+              { label: 'Admin dashboard', href: '/admin' },
+              { label: 'Partners', href: '/admin/partners' },
+              { label: partner.name },
+            ]}
+          />
           <Eyebrow>Administration</Eyebrow>
           <Subheading className="text-3xl/9 sm:text-4xl/12">Manage partner</Subheading>
-          <Link href="/admin/partners">← Back to partners</Link>
         </div>
 
         <Card className="p-8 sm:p-10">

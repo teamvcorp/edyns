@@ -10,7 +10,11 @@ export const metadata: Metadata = { title: 'Finishing verification' }
 export default async function PlaidOAuthPage() {
   await requireRole('tenant', '/tenants/login')
   return (
-    <PortalShell eyebrow="Tenant portal" title="Bank verification">
+    <PortalShell
+      eyebrow="Tenant portal"
+      title="Bank verification"
+      breadcrumbs={[{ label: 'Tenant portal', href: '/tenants' }, { label: 'Bank verification' }]}
+    >
       <Card>
         <PlaidOAuthReturn />
       </Card>

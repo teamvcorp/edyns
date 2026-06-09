@@ -3,7 +3,12 @@ import { requireRole } from '@/lib/dal'
 import { listAllRequests } from '@/lib/moveins'
 import { getTenantById } from '@/lib/tenants'
 import { getPropertyById } from '@/lib/properties'
-import { approveMoveInAction, declineMoveInAction } from '@/app/actions/admin'
+import {
+  approveMoveInAction,
+  declineMoveInAction,
+  reverseMoveInAction,
+  evictMoveInAction,
+} from '@/app/actions/admin'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -30,7 +35,11 @@ export default async function AdminMoveInsPage() {
   const decided = rows.filter((r) => r.request.status !== 'requested')
 
   return (
-    <PortalShell eyebrow="Administration" title={`Move-in requests (${requests.length})`}>
+    <PortalShell
+      eyebrow="Administration"
+      title={`Move-in requests (${requests.length})`}
+      breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Move-in requests' }]}
+    >
       <div className="flex flex-col gap-6">
         <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Pending ({pending.length})</h3>
         {pending.length === 0 ? (
@@ -85,9 +94,25 @@ export default async function AdminMoveInsPage() {
                     {property ? formatAddress(property.address) : 'Property'}
                   </span>
                 </div>
-                <span className="text-sm font-semibold text-olive-700 capitalize dark:text-olive-300">
-                  {request.status}
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-olive-700 capitalize dark:text-olive-300">
+                    {request.status}
+                  </span>
+                  {request.status === 'approved' && (
+                    <>
+                      <form action={reverseMoveInAction}>
+                        <input type="hidden" name="id" value={request.id} />
+                        <SoftButton type="submit">Reverse</SoftButton>
+                      </form>
+                      <form action={evictMoveInAction}>
+                        <input type="hidden" name="id" value={request.id} />
+                        <SoftButton type="submit" className="text-red-600 dark:text-red-400">
+                          Evict
+                        </SoftButton>
+                      </form>
+                    </>
+                  )}
+                </div>
               </Card>
             ))}
           </div>
