@@ -19,6 +19,9 @@ export const APPLICATION_FEE_CENTS = 2500
 /** Share of a tenant's monthly income collected as rent. */
 export const COLLECTION_RATE = 0.4
 
+/** Effort Exchange: minimum verified hours worked per week. */
+export const REQUIRED_WEEKLY_HOURS = 35
+
 /** Stripe card processing rate (worst case across bank/card) — the payer covers this. */
 export const STRIPE_PERCENT = 0.029
 export const STRIPE_FIXED_CENTS = 30

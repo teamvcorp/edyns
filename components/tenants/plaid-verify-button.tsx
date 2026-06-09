@@ -15,12 +15,26 @@ export function PlaidVerifyButton() {
   useEffect(() => {
     fetch('/api/tenants/plaid/link-token', { method: 'POST' })
       .then((r) => r.json())
-      .then((d) => (d.link_token ? setToken(d.link_token) : setError('Could not start verification.')))
+      .then((d) => {
+        if (!d.link_token) return setError('Could not start verification.')
+        setToken(d.link_token)
+        // Persist so an OAuth bank redirect can resume on /tenants/plaid-oauth.
+        try {
+          localStorage.setItem('plaid_link_token', d.link_token)
+        } catch {
+          /* storage may be unavailable */
+        }
+      })
       .catch(() => setError('Could not start verification.'))
   }, [])
 
   const onSuccess = useCallback(
     (publicToken: string) => {
+      try {
+        localStorage.removeItem('plaid_link_token')
+      } catch {
+        /* ignore */
+      }
       startTransition(async () => {
         const res = await completePlaidLink(publicToken)
         if (res?.error) setError(res.error)

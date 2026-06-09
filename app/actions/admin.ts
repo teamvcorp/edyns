@@ -18,6 +18,9 @@ import {
   placeTenant,
   getTenantById,
   setBilling,
+  setNextIncomeCheck,
+  setEmploymentTypeById,
+  resumeBilling,
   type BillingFrequency,
 } from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
@@ -383,11 +386,50 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
     firstDraftAt: draftDate,
     startedAt: new Date(),
   })
+  // First monthly income/job-loss re-check lands on the first draft (≈ payday).
+  await setNextIncomeCheck(id, draftDate)
 
   revalidatePath('/admin/tenants')
   revalidatePath(`/admin/tenants/${id}`)
   revalidatePath('/tenants')
   return undefined
+}
+
+/** Admin override of a tenant's employment type (self-employed + claimed hourly rate). */
+export async function setTenantEmploymentTypeAction(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '')
+  const selfEmployed = formData.get('selfEmployed') === 'on' || formData.get('selfEmployed') === 'true'
+  const rate = Number(String(formData.get('hourlyRate') ?? '').trim())
+  if (!id) return { error: 'Missing tenant id.' }
+  if (selfEmployed && !(Number.isFinite(rate) && rate > 0)) return { error: 'Enter the claimed hourly rate.' }
+
+  await setEmploymentTypeById(id, { selfEmployed, claimedHourlyRate: selfEmployed ? rate : undefined })
+  revalidatePath(`/admin/tenants/${id}`)
+  return undefined
+}
+
+/** Resume rent after an admin reconfirms income for a tenant paused by the job-loss check. */
+export async function resumeTenantBillingAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '')
+  const tenant = await getTenantById(id)
+  if (tenant?.billing) {
+    try {
+      await getStripe().subscriptions.update(tenant.billing.stripeSubscriptionId, { pause_collection: '' })
+    } catch {
+      /* if Stripe update fails, still clear our flag; admin can retry */
+    }
+    const next = new Date()
+    next.setMonth(next.getMonth() + 1)
+    await resumeBilling(id, next)
+  }
+  revalidatePath('/admin/tenants')
+  revalidatePath(`/admin/tenants/${id}`)
+  redirect(`/admin/tenants/${id}`)
 }
 
 // ---- Move-in requests ----

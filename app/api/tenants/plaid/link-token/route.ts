@@ -23,10 +23,11 @@ export async function POST(): Promise<NextResponse> {
   try {
     let userToken = tenant.plaidUserToken
     if (!userToken) {
-      userToken = await createUserToken(session.sub)
-      await setPlaidUserToken(session.sub, userToken)
+      const created = await createUserToken(session.sub)
+      userToken = created.userToken
+      await setPlaidUserToken(session.sub, created.userToken, created.userId)
     }
-    const linkToken = await createIncomeLinkToken(userToken, session.sub)
+    const linkToken = await createIncomeLinkToken(userToken, session.sub, Boolean(tenant.employment.selfEmployed))
     return NextResponse.json({ link_token: linkToken })
   } catch {
     return NextResponse.json({ error: 'Could not start verification' }, { status: 500 })

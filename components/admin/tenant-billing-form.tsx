@@ -8,7 +8,13 @@ const inputClass =
   'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10'
 const labelClass = 'text-sm font-medium text-olive-950 dark:text-white'
 
-export function TenantBillingForm({ tenantId }: { tenantId: string }) {
+export function TenantBillingForm({
+  tenantId,
+  suggestedAmount,
+}: {
+  tenantId: string
+  suggestedAmount?: number
+}) {
   const [state, action, pending] = useActionState<AdminActionState, FormData>(startTenantBillingAction, undefined)
 
   return (
@@ -17,7 +23,21 @@ export function TenantBillingForm({ tenantId }: { tenantId: string }) {
 
       <label className="flex flex-col gap-1">
         <span className={labelClass}>Recurring amount (40% of pay, in dollars)</span>
-        <input name="amount" type="number" min="1" step="0.01" required placeholder="e.g. 720.00" className={inputClass} />
+        <input
+          name="amount"
+          type="number"
+          min="1"
+          step="0.01"
+          required
+          placeholder="e.g. 720.00"
+          defaultValue={suggestedAmount ? suggestedAmount.toFixed(2) : undefined}
+          className={inputClass}
+        />
+        {suggestedAmount ? (
+          <span className="text-xs text-olive-600 dark:text-olive-500">
+            Pre-filled with 40% of verified income. Adjust if needed.
+          </span>
+        ) : null}
       </label>
 
       <label className="flex flex-col gap-1">

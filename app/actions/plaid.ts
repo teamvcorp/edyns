@@ -8,7 +8,8 @@ import {
   recordPlaidLink,
   flagTenantForReview,
 } from '@/lib/tenants'
-import { exchangePublicToken, getMonthlyIncome } from '@/lib/plaid'
+import { exchangePublicToken } from '@/lib/plaid'
+import { readIncome } from '@/lib/income'
 import { encryptString } from '@/lib/crypto'
 import { sendSecurityAlert } from '@/lib/email'
 
@@ -41,11 +42,21 @@ export async function completePlaidLink(publicToken: string): Promise<PlaidResul
 
   try {
     const { accessToken, itemId } = await exchangePublicToken(publicToken)
-    const income = tenant.plaidUserToken ? await getMonthlyIncome(tenant.plaidUserToken) : null
+    // Read income the right way for this tenant: Payroll gross + hours for
+    // employees, Bank deposits + implied hours for the self-employed.
+    const reading = tenant.plaidUserToken
+      ? await readIncome({
+          userToken: tenant.plaidUserToken,
+          selfEmployed: Boolean(tenant.employment.selfEmployed),
+          claimedHourlyRate: tenant.employment.claimedHourlyRate,
+        })
+      : { monthlyIncome: null, weeklyHours: null, lastPayDate: null }
     await savePlaidVerification(session.sub, {
       accessTokenEnc: encryptString(accessToken),
       itemId,
-      verifiedMonthlyIncome: income,
+      verifiedMonthlyIncome: reading.monthlyIncome,
+      verifiedWeeklyHours: reading.weeklyHours,
+      lastPayDate: reading.lastPayDate,
     })
   } catch {
     return { error: 'Verification failed. Please try again.' }

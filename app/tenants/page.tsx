@@ -4,11 +4,12 @@ import { getTenantByUserId } from '@/lib/tenants'
 import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment } from '@/app/actions/tenants'
-import { COLLECTION_RATE } from '@/lib/stripe'
+import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
 import { PaystubUploader } from '@/components/tenants/paystub-uploader'
+import { SelfEmployedToggle } from '@/components/tenants/self-employed-toggle'
 import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
@@ -59,6 +60,7 @@ export default async function TenantPortalPage({
   const householdSize = 1 + tenant.adults.length + tenant.children.length
 
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
+  const verifiedHours = tenant.employment.verifiedWeeklyHours
   const billing = tenant.billing
   const incomeStatus = tenant.employment.verified
     ? 'Verified'
@@ -147,32 +149,52 @@ export default async function TenantPortalPage({
             <p>Income verification unlocks once your application is approved. We’ll email you when it’s time.</p>
           </Text>
         ) : tenant.employment.verified ? (
-          <Text className="text-sm/6">
-            <p>
-              Bank connected via Plaid.{' '}
-              {verifiedIncome ? `Verified income ${formatCurrency(verifiedIncome)}/mo.` : 'Income estimate pending.'}
-            </p>
-          </Text>
+          <>
+            <Text className="text-sm/6">
+              <p>
+                Bank connected via Plaid.{' '}
+                {verifiedIncome ? `Verified income ${formatCurrency(verifiedIncome)}/mo.` : 'Income estimate pending.'}
+                {verifiedHours != null ? ` Confirmed ${verifiedHours} hrs/week.` : ''}
+              </p>
+            </Text>
+            {verifiedHours == null && (
+              <>
+                <Text className="text-sm/6">
+                  <p>
+                    We couldn’t confirm your weekly hours automatically. Please upload your most recent paystub so we can
+                    confirm you’re working {REQUIRED_WEEKLY_HOURS}+ hours a week.
+                  </p>
+                </Text>
+                <PaystubUploader currentUrl={tenant.paystub?.url} />
+                {tenant.paystub && (
+                  <p className="text-sm text-olive-700 dark:text-olive-300">Paystub received — our team will review it.</p>
+                )}
+              </>
+            )}
+          </>
         ) : (
           <>
             <Text className="text-sm/6">
               <p>
-                One last step: verify your income so we can set up your rent. Connect your bank with Plaid (fastest), or
-                upload your most recent paystub. You cover any Plaid/Stripe fees.
+                One last step before rent setup: <strong>connect your bank</strong> so we can confirm your income
+                deposits — this is required. You cover any Plaid/Stripe fees.
               </p>
             </Text>
-            <div className="flex flex-col gap-3">
-              <PlaidVerifyButton />
+            <SelfEmployedToggle
+              selfEmployed={Boolean(tenant.employment.selfEmployed)}
+              hourlyRate={tenant.employment.claimedHourlyRate}
+            />
+            <PlaidVerifyButton />
+            <div className="mt-2 flex flex-col gap-2 border-t border-olive-950/10 pt-3 dark:border-white/10">
               <span className="text-xs text-olive-600 dark:text-olive-500">
-                or upload your most recent paystub (PDF or image)
+                Trouble connecting your bank, or we couldn’t confirm your hours? Upload your most recent paystub (PDF or
+                image) and our team will verify it manually.
               </span>
               <PaystubUploader currentUrl={tenant.paystub?.url} />
+              {tenant.paystub && (
+                <p className="text-sm text-olive-700 dark:text-olive-300">Paystub received — our team will review it.</p>
+              )}
             </div>
-            {tenant.paystub && (
-              <p className="text-sm text-olive-700 dark:text-olive-300">
-                Paystub received — our team will review it and set up your rent collection.
-              </p>
-            )}
           </>
         )}
       </Card>

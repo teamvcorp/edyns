@@ -12,6 +12,7 @@ import {
   attachStripeCustomer,
   setFeeSession,
   setPaystub,
+  setEmploymentType,
   type Person,
 } from '@/lib/tenants'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
@@ -206,5 +207,26 @@ export async function savePaystub(url: string): Promise<{ error?: string } | voi
   if (!/^https?:\/\/\S+$/.test(url)) return { error: 'That file could not be saved. Please try again.' }
 
   await setPaystub(session.sub, url)
+  revalidatePath('/tenants')
+}
+
+/**
+ * Set whether the tenant is self-employed (verifies via bank deposits, hours
+ * implied from a claimed hourly rate) vs. employed (payroll). Admin can override.
+ */
+export async function setSelfEmployment(
+  selfEmployed: boolean,
+  hourlyRate: number | null,
+): Promise<{ error?: string } | void> {
+  const session = await requireRole('tenant', '/tenants/login')
+  const tenant = await getTenantByUserId(session.sub)
+  if (!tenant) return { error: 'No application on file.' }
+  if (selfEmployed && !(hourlyRate != null && hourlyRate > 0)) {
+    return { error: 'Enter your hourly rate so we can confirm your weekly hours.' }
+  }
+  await setEmploymentType(session.sub, {
+    selfEmployed,
+    claimedHourlyRate: selfEmployed ? hourlyRate ?? undefined : undefined,
+  })
   revalidatePath('/tenants')
 }

@@ -9,7 +9,11 @@ import { Subheading } from '@/components/elements/subheading'
 import { Link } from '@/components/elements/link'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
+import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
+import { resumeTenantBillingAction } from '@/app/actions/admin'
+import { Button } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
+import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 
 export const metadata: Metadata = { title: 'Review application' }
 
@@ -99,6 +103,14 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
             <Row label="Reported income" value={formatCurrency(t.employment.monthlyIncome)} />
             <Row label="Employer phone" value={t.employment.employerPhone ?? '—'} />
             <Row
+              label="Employment type"
+              value={
+                t.employment.selfEmployed
+                  ? `Self-employed${t.employment.claimedHourlyRate ? ` · claims ${formatCurrency(t.employment.claimedHourlyRate)}/hr` : ''}`
+                  : 'Employed (payroll)'
+              }
+            />
+            <Row
               label="Income verification"
               value={
                 t.employment.verified
@@ -109,8 +121,31 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
               }
             />
             <Row
-              label="Verified income"
-              value={t.employment.verifiedMonthlyIncome ? formatCurrency(t.employment.verifiedMonthlyIncome) : '—'}
+              label="Verified gross income"
+              value={
+                t.employment.verifiedMonthlyIncome ? `${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo` : '—'
+              }
+            />
+            <Row
+              label="Verified hours/week"
+              value={
+                t.employment.verifiedWeeklyHours != null ? (
+                  <span
+                    className={
+                      t.employment.verifiedWeeklyHours >= REQUIRED_WEEKLY_HOURS
+                        ? 'text-green-700 dark:text-green-400'
+                        : 'text-red-600 dark:text-red-400'
+                    }
+                  >
+                    {t.employment.verifiedWeeklyHours} hrs ·{' '}
+                    {t.employment.verifiedWeeklyHours >= REQUIRED_WEEKLY_HOURS
+                      ? `meets ${REQUIRED_WEEKLY_HOURS}`
+                      : `below ${REQUIRED_WEEKLY_HOURS}`}
+                  </span>
+                ) : (
+                  '—'
+                )
+              }
             />
             {t.paystub && (
               <div className="sm:col-span-2">
@@ -130,6 +165,11 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
               </div>
             )}
           </dl>
+          <EmploymentTypeForm
+            tenantId={t.id}
+            selfEmployed={Boolean(t.employment.selfEmployed)}
+            hourlyRate={t.employment.claimedHourlyRate}
+          />
         </Card>
 
         <Card className="flex flex-col gap-4">
@@ -171,12 +211,28 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
           <Card className="flex flex-col gap-4">
             <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent collection</h3>
             {t.billing ? (
-              <dl className="grid gap-4 sm:grid-cols-3">
-                <Row label="Amount" value={`${formatCurrency(t.billing.amountCents / 100)} ${frequencyLabel[t.billing.frequency]}`} />
-                <Row label="Base (40%)" value={formatCurrency(t.billing.baseAmountCents / 100)} />
-                <Row label="Status" value={t.billing.status} />
-                <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
-              </dl>
+              <>
+                <dl className="grid gap-4 sm:grid-cols-3">
+                  <Row label="Amount" value={`${formatCurrency(t.billing.amountCents / 100)} ${frequencyLabel[t.billing.frequency]}`} />
+                  <Row label="Base (40%)" value={formatCurrency(t.billing.baseAmountCents / 100)} />
+                  <Row label="Status" value={t.billing.status} />
+                  <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
+                </dl>
+                {t.billing.status === 'paused' && (
+                  <div className="flex flex-col gap-2 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+                    <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                      Rent is paused — the monthly income check found no recent income. Reconfirm the tenant still has
+                      income before resuming; the next draft won’t occur until you do.
+                    </p>
+                    <form action={resumeTenantBillingAction}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <Button type="submit" className="w-fit">
+                        Reconfirm income &amp; resume rent
+                      </Button>
+                    </form>
+                  </div>
+                )}
+              </>
             ) : !t.employment.verified && !t.paystub ? (
               <p className="text-sm text-olive-600 dark:text-olive-500">
                 Waiting on income verification — the tenant must connect their bank via Plaid or upload a paystub before
@@ -196,7 +252,20 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
                     : '(paystub uploaded — review it above)'}
                   . Enter the recurring 40% amount, frequency, and first draft date.
                 </p>
-                <TenantBillingForm tenantId={t.id} />
+                {t.employment.verifiedWeeklyHours != null && t.employment.verifiedWeeklyHours < REQUIRED_WEEKLY_HOURS && (
+                  <p className="text-sm font-medium text-red-600 dark:text-red-400">
+                    ⚠️ Verified at {t.employment.verifiedWeeklyHours} hrs/week — below the {REQUIRED_WEEKLY_HOURS}-hour
+                    Effort Exchange requirement. Confirm before starting rent.
+                  </p>
+                )}
+                <TenantBillingForm
+                  tenantId={t.id}
+                  suggestedAmount={
+                    t.employment.verifiedMonthlyIncome
+                      ? Math.round(t.employment.verifiedMonthlyIncome * COLLECTION_RATE * 100) / 100
+                      : undefined
+                  }
+                />
               </>
             )}
           </Card>

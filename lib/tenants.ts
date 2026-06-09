@@ -16,16 +16,24 @@ export interface Employment {
   jobTitle: string
   monthlyIncome: number
   employerPhone?: string
+  /** Self-employed tenants verify via Bank deposits (no payroll); hours are implied from rate. */
+  selfEmployed?: boolean
+  /** Self-employed: claimed hourly rate, used to imply weekly hours from verified income. */
+  claimedHourlyRate?: number
   /** Set once income is confirmed (bank connected through Plaid). */
   verified?: boolean
   /** How income was evidenced: Plaid bank connection or a manually uploaded paystub. */
   verificationMethod?: VerificationMethod
-  /** Monthly income derived from Plaid Bank Income, when available. */
+  /** Monthly income derived from Plaid Bank/Payroll Income, when available. */
   verifiedMonthlyIncome?: number
+  /** Average hours worked per week (payroll actual, or implied for self-employed). */
+  verifiedWeeklyHours?: number
+  /** Most recent pay/deposit date seen (used by the monthly job-loss check). ISO date. */
+  lastPayDate?: string
   verifiedAt?: Date
 }
 
-export type BillingStatus = 'none' | 'active' | 'past_due' | 'canceled'
+export type BillingStatus = 'none' | 'active' | 'past_due' | 'canceled' | 'paused'
 export type BillingFrequency = 'weekly' | 'biweekly' | 'monthly'
 
 export interface Billing {
@@ -70,6 +78,8 @@ export interface TenantDoc {
   defaultPaymentMethodId?: string
   /** Plaid: user token + encrypted access token for income verification. */
   plaidUserToken?: string
+  /** Plaid user_id — keys user-based income webhooks (e.g. BANK_INCOME_REFRESH_COMPLETE). */
+  plaidUserId?: string
   plaidAccessTokenEnc?: string
   plaidItemId?: string
   /** Stripe Identity (government ID + selfie). Full ID never stored — only last 4. */
@@ -87,6 +97,8 @@ export interface TenantDoc {
   flaggedAt?: Date
   /** Recurring rent collection (40% of income) via Stripe. */
   billing?: Billing
+  /** When the next monthly income/job-loss re-check is due (set when billing starts). */
+  nextIncomeCheckAt?: Date
   /** Tenants start at tier 0 on approval and move up as they relocate. */
   currentTier?: number
   currentPropertyId?: ObjectId
@@ -108,6 +120,8 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
   await col.createIndex({ status: 1 })
   await col.createIndex({ 'fee.stripeSessionId': 1 })
   await col.createIndex({ 'billing.stripeSubscriptionId': 1 })
+  await col.createIndex({ plaidItemId: 1 })
+  await col.createIndex({ plaidUserId: 1 })
   return col
 }
 
@@ -200,14 +214,22 @@ export async function applyFeeResult(
 
 // ---- Plaid / verification ----
 
-export async function setPlaidUserToken(userId: string, userToken: string): Promise<void> {
+export async function setPlaidUserToken(userId: string, userToken: string, plaidUserId?: string): Promise<void> {
   const col = await tenantsCollection()
-  await col.updateOne({ userId: new ObjectId(userId) }, { $set: { plaidUserToken: userToken, updatedAt: new Date() } })
+  const set: Record<string, unknown> = { plaidUserToken: userToken, updatedAt: new Date() }
+  if (plaidUserId) set.plaidUserId = plaidUserId
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
 }
 
 export async function savePlaidVerification(
   userId: string,
-  input: { accessTokenEnc: string; itemId: string; verifiedMonthlyIncome: number | null },
+  input: {
+    accessTokenEnc: string
+    itemId: string
+    verifiedMonthlyIncome: number | null
+    verifiedWeeklyHours?: number | null
+    lastPayDate?: string | null
+  },
 ): Promise<void> {
   const col = await tenantsCollection()
   const set: Record<string, unknown> = {
@@ -219,7 +241,40 @@ export async function savePlaidVerification(
     updatedAt: new Date(),
   }
   if (input.verifiedMonthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
+  if (input.verifiedWeeklyHours != null) set['employment.verifiedWeeklyHours'] = input.verifiedWeeklyHours
+  if (input.lastPayDate) set['employment.lastPayDate'] = input.lastPayDate
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
+}
+
+/** Set the tenant's employment type (self-employed toggle + claimed hourly rate). */
+export async function setEmploymentType(
+  userId: string,
+  input: { selfEmployed: boolean; claimedHourlyRate?: number },
+): Promise<void> {
+  const col = await tenantsCollection()
+  const set: Record<string, unknown> = { 'employment.selfEmployed': input.selfEmployed, updatedAt: new Date() }
+  const unset: Record<string, unknown> = {}
+  if (input.selfEmployed && input.claimedHourlyRate != null) set['employment.claimedHourlyRate'] = input.claimedHourlyRate
+  if (!input.selfEmployed) unset['employment.claimedHourlyRate'] = ''
+  const update: Record<string, unknown> = { $set: set }
+  if (Object.keys(unset).length) update.$unset = unset
+  await col.updateOne({ userId: new ObjectId(userId) }, update)
+}
+
+/** Set the same employment type by tenant application id (admin override). */
+export async function setEmploymentTypeById(
+  tenantId: string,
+  input: { selfEmployed: boolean; claimedHourlyRate?: number },
+): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  const set: Record<string, unknown> = { 'employment.selfEmployed': input.selfEmployed, updatedAt: new Date() }
+  const unset: Record<string, unknown> = {}
+  if (input.selfEmployed && input.claimedHourlyRate != null) set['employment.claimedHourlyRate'] = input.claimedHourlyRate
+  if (!input.selfEmployed) unset['employment.claimedHourlyRate'] = ''
+  const update: Record<string, unknown> = { $set: set }
+  if (Object.keys(unset).length) update.$unset = unset
+  await col.updateOne({ _id: new ObjectId(tenantId) }, update)
 }
 
 /** Increment and return the tenant's Plaid link counter (bank-link velocity monitoring). */
@@ -257,17 +312,99 @@ export async function setPaystub(userId: string, url: string): Promise<void> {
   )
 }
 
+/** Look up a tenant by their Plaid item id (item-based income webhooks). */
+export async function getTenantByPlaidItem(itemId: string): Promise<Tenant | null> {
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ plaidItemId: itemId })
+  return doc ? toTenant(doc) : null
+}
+
+/** Look up a tenant by their Plaid user_id (user-based income webhooks, e.g. bank-income refresh). */
+export async function getTenantByPlaidUserId(plaidUserId: string): Promise<Tenant | null> {
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ plaidUserId })
+  return doc ? toTenant(doc) : null
+}
+
+/** Mark income verified + refresh the verified figures for a tenant (by application id). */
+export async function setVerifiedIncome(
+  tenantId: string,
+  input: { monthlyIncome: number | null; weeklyHours?: number | null; lastPayDate?: string | null },
+): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  const set: Record<string, unknown> = {
+    'employment.verified': true,
+    'employment.verificationMethod': 'plaid',
+    'employment.verifiedAt': new Date(),
+    updatedAt: new Date(),
+  }
+  if (input.monthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.monthlyIncome
+  if (input.weeklyHours != null) set['employment.verifiedWeeklyHours'] = input.weeklyHours
+  if (input.lastPayDate) set['employment.lastPayDate'] = input.lastPayDate
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: set })
+}
+
 export async function setBilling(userId: string, billing: Billing): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: { billing, updatedAt: new Date() } })
 }
 
-/** Update rent billing status from a Stripe subscription/invoice webhook. */
+/** Update rent billing status from a Stripe webhook. Never clobbers a manual 'paused' (job-loss) state. */
 export async function setBillingStatusBySubscription(subscriptionId: string, status: BillingStatus): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne(
-    { 'billing.stripeSubscriptionId': subscriptionId },
+    { 'billing.stripeSubscriptionId': subscriptionId, 'billing.status': { $ne: 'paused' } },
     { $set: { 'billing.status': status, updatedAt: new Date() } },
+  )
+}
+
+// ---- Monthly income / job-loss check ----
+
+/** Set when the next monthly income re-check should run (by application id). */
+export async function setNextIncomeCheck(tenantId: string, at: Date): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { nextIncomeCheckAt: at, updatedAt: new Date() } })
+}
+
+/** Tenants whose rent is active and whose monthly income re-check is due. */
+export async function listTenantsDueForIncomeCheck(now: Date): Promise<Tenant[]> {
+  const col = await tenantsCollection()
+  const docs = await col
+    .find({ 'billing.status': 'active', nextIncomeCheckAt: { $lte: now }, plaidUserToken: { $exists: true } })
+    .toArray()
+  return docs.map(toTenant)
+}
+
+/** Pause rent for review (job loss / income not found). Stripe pause happens in the caller. */
+export async function pauseBillingForReview(tenantId: string, reason: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    {
+      $set: {
+        'billing.status': 'paused',
+        flaggedForReview: true,
+        reviewReason: reason,
+        flaggedAt: new Date(),
+        updatedAt: new Date(),
+      },
+    },
+  )
+}
+
+/** Resume rent after an admin reconfirms income. Clears the review flag and reschedules the next check. */
+export async function resumeBilling(tenantId: string, nextCheckAt: Date): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    {
+      $set: { 'billing.status': 'active', nextIncomeCheckAt: nextCheckAt, updatedAt: new Date() },
+      $unset: { flaggedForReview: '', reviewReason: '', flaggedAt: '' },
+    },
   )
 }
 
