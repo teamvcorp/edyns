@@ -10,7 +10,11 @@ import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
-import { resumeTenantBillingAction, replaceImportedWithBillingAction } from '@/app/actions/admin'
+import {
+  resumeTenantBillingAction,
+  replaceImportedWithBillingAction,
+  resendWelcomeEmailAction,
+} from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
@@ -30,9 +34,22 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-export default async function AdminTenantReviewPage({ params }: { params: Promise<{ id: string }> }) {
+const welcomeCopy: Record<string, string> = {
+  sent: 'Welcome email sent with a new temporary password.',
+  failed: 'Password was reset, but the email failed to send — resend or share access another way.',
+  notfound: 'Could not find that user account.',
+}
+
+export default async function AdminTenantReviewPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ welcome?: string }>
+}) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
+  const { welcome } = await searchParams
   const t = await getTenantById(id)
   if (!t) notFound()
 
@@ -58,6 +75,34 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
             {t.reviewReason && <p className="text-sm text-red-700 dark:text-red-400">{t.reviewReason}</p>}
           </div>
         )}
+
+        {welcome && welcomeCopy[welcome] && (
+          <p
+            role="status"
+            className={
+              welcome === 'sent'
+                ? 'text-sm text-olive-700 dark:text-olive-300'
+                : 'text-sm text-red-600 dark:text-red-400'
+            }
+          >
+            {welcomeCopy[welcome]}
+          </p>
+        )}
+
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Account access</h3>
+          <p className="text-sm text-olive-600 dark:text-olive-500">
+            Email this tenant a new temporary password and sign-in link. They’ll be prompted to set their own password.
+            Useful for imported tenants or anyone who lost access.
+          </p>
+          <form action={resendWelcomeEmailAction}>
+            <input type="hidden" name="userId" value={t.userId} />
+            <input type="hidden" name="returnTo" value={`/admin/tenants/${t.id}`} />
+            <SoftButton type="submit" className="w-fit">
+              Resend welcome email
+            </SoftButton>
+          </form>
+        </Card>
 
         <Card className="flex flex-col gap-4">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Head of household</h3>

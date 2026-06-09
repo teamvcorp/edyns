@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { requireRole } from '@/lib/dal'
 import { findPartnerById } from '@/lib/users'
 import { listPropertiesByPartner } from '@/lib/properties'
-import { deletePartnerAction } from '@/app/actions/admin'
+import { deletePartnerAction, resendWelcomeEmailAction } from '@/app/actions/admin'
 import { Container } from '@/components/elements/container'
 import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
@@ -18,16 +18,22 @@ import { formatAddress, formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Manage partner' }
 
+const welcomeCopy: Record<string, string> = {
+  sent: 'Welcome email sent with a new temporary password.',
+  failed: 'Password was reset, but the email failed to send — resend or share access another way.',
+  notfound: 'Could not find that user account.',
+}
+
 export default async function AdminPartnerEditPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string }>
+  searchParams: Promise<{ error?: string; welcome?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { error } = await searchParams
+  const { error, welcome } = await searchParams
 
   const partner = await findPartnerById(id)
   if (!partner) notFound()
@@ -51,8 +57,36 @@ export default async function AdminPartnerEditPage({
           <Subheading className="text-3xl/9 sm:text-4xl/12">Manage partner</Subheading>
         </div>
 
+        {welcome && welcomeCopy[welcome] && (
+          <p
+            role="status"
+            className={
+              welcome === 'sent'
+                ? 'text-sm text-olive-700 dark:text-olive-300'
+                : 'text-sm text-red-600 dark:text-red-400'
+            }
+          >
+            {welcomeCopy[welcome]}
+          </p>
+        )}
+
         <Card className="p-8 sm:p-10">
           <PartnerEditForm partner={partner} />
+        </Card>
+
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Account access</h3>
+          <p className="text-sm text-olive-600 dark:text-olive-500">
+            Email this partner a new temporary password and sign-in link. They’ll be prompted to set their own password.
+            Useful for anyone who missed setup or lost access.
+          </p>
+          <form action={resendWelcomeEmailAction}>
+            <input type="hidden" name="userId" value={partner.id} />
+            <input type="hidden" name="returnTo" value={`/admin/partners/${partner.id}`} />
+            <SoftButton type="submit" className="w-fit">
+              Resend welcome email
+            </SoftButton>
+          </form>
         </Card>
 
         {/* Their properties */}

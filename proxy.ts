@@ -38,6 +38,14 @@ export async function proxy(req: NextRequest) {
     return NextResponse.redirect(new URL(area.login, req.nextUrl))
   }
 
+  // Force temp-password users to set a new password before anything else.
+  if (area.role !== 'admin' && session.mustReset) {
+    const setPasswordPath = `${area.prefix}/set-password`
+    if (pathname !== setPasswordPath) {
+      return NextResponse.redirect(new URL(setPasswordPath, req.nextUrl))
+    }
+  }
+
   return NextResponse.next()
 }
 

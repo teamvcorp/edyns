@@ -18,6 +18,8 @@ export interface SessionPayload {
   sub: string
   role: Role
   name?: string
+  /** True while the user is on an admin-issued temp password (must set a new one). */
+  mustReset?: boolean
   [key: string]: unknown
 }
 

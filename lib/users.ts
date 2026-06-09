@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { ObjectId, type Collection } from 'mongodb'
+import { randomBytes } from 'node:crypto'
 import bcrypt from 'bcryptjs'
 import { getDb } from './mongodb'
 import { encryptString } from './crypto'
@@ -36,6 +37,11 @@ export interface UserDoc {
   stripeAccountId?: string
   /** How often Stripe pays the connected account's balance out to their bank. */
   payoutFrequency?: PayoutFrequency
+  /**
+   * Set when an admin issues a temporary password (welcome / welcome-back email).
+   * The user is forced to choose a new password before they can use their portal.
+   */
+  mustResetPassword?: boolean
   createdAt: Date
 }
 
@@ -164,12 +170,47 @@ export async function verifyCredentials(
   email: string,
   password: string,
   role: Exclude<Role, 'admin'>,
-): Promise<PublicUser | null> {
+): Promise<(PublicUser & { mustReset: boolean }) | null> {
   const user = await findUserByEmail(email, role)
   const hash = user?.passwordHash ?? '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv'
   const ok = await bcrypt.compare(password, hash)
   if (!ok || !user) return null
-  return toPublicUser(user)
+  return { ...toPublicUser(user), mustReset: Boolean(user.mustResetPassword) }
+}
+
+/** A short, URL-safe temporary password (~12 chars) for admin-issued resets. */
+function generateTempPassword(): string {
+  return randomBytes(9).toString('base64url')
+}
+
+/**
+ * Issue a fresh temporary password for a user (by user id) and require them to
+ * reset it on next sign-in. Returns the details needed to email the temp password,
+ * or null if the user doesn't exist.
+ */
+export async function resetUserPassword(
+  userId: string,
+): Promise<{ email: string; name: string; role: Exclude<Role, 'admin'>; tempPassword: string } | null> {
+  if (!ObjectId.isValid(userId)) return null
+  const col = await usersCollection()
+  const user = await col.findOne({ _id: new ObjectId(userId) })
+  if (!user) return null
+  const tempPassword = generateTempPassword()
+  const passwordHash = await bcrypt.hash(tempPassword, 10)
+  await col.updateOne({ _id: user._id }, { $set: { passwordHash, mustResetPassword: true } })
+  return { email: user.email, name: user.name, role: user.role, tempPassword }
+}
+
+/** Set a user's password (their own choice) and clear the force-reset flag. */
+export async function setUserPassword(userId: string, newPassword: string): Promise<boolean> {
+  if (!ObjectId.isValid(userId)) return false
+  const col = await usersCollection()
+  const passwordHash = await bcrypt.hash(newPassword, 10)
+  const res = await col.updateOne(
+    { _id: new ObjectId(userId) },
+    { $set: { passwordHash }, $unset: { mustResetPassword: '' } },
+  )
+  return res.matchedCount === 1
 }
 
 export async function createUser(input: {

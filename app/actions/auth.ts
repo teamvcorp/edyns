@@ -1,11 +1,12 @@
 'use server'
 
 import { redirect } from 'next/navigation'
-import { createSession, deleteSession } from '@/lib/session'
-import { verifyCredentials } from '@/lib/users'
+import { createSession, deleteSession, getSession } from '@/lib/session'
+import { verifyCredentials, setUserPassword } from '@/lib/users'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export type AuthState = { error?: string } | undefined
+export type SetPasswordState = { error?: string } | undefined
 
 const portalFor = { partner: '/partners', tenant: '/tenants' } as const
 
@@ -34,8 +35,9 @@ async function loginWithCredentials(
     return { error: 'Invalid email or password.' }
   }
 
-  await createSession({ sub: user.id, role: user.role, name: user.name })
-  redirect(portalFor[role]) // throws NEXT_REDIRECT — must stay outside try/catch
+  await createSession({ sub: user.id, role: user.role, name: user.name, mustReset: user.mustReset })
+  // Temp-password users must choose a new password before using the portal.
+  redirect(user.mustReset ? `${portalFor[role]}/set-password` : portalFor[role]) // throws NEXT_REDIRECT
 }
 
 export async function loginPartner(_prev: AuthState, formData: FormData): Promise<AuthState> {
@@ -64,6 +66,28 @@ export async function loginAdmin(_prev: AuthState, formData: FormData): Promise<
 
   await createSession({ sub: 'admin', role: 'admin', name: 'Administrator' })
   redirect('/admin')
+}
+
+/**
+ * Set a new password for the signed-in tenant/partner. Clears the force-reset
+ * flag and reissues a clean session, then sends them into their portal. Used both
+ * for the forced temp-password reset and voluntary password changes.
+ */
+export async function setPasswordAction(_prev: SetPasswordState, formData: FormData): Promise<SetPasswordState> {
+  const session = await getSession()
+  if (!session || (session.role !== 'tenant' && session.role !== 'partner')) redirect('/')
+
+  const password = String(formData.get('password') ?? '')
+  const confirm = String(formData.get('confirm') ?? '')
+  if (password.length < 8) return { error: 'Password must be at least 8 characters.' }
+  if (password !== confirm) return { error: 'Passwords do not match.' }
+
+  const ok = await setUserPassword(session.sub, password)
+  if (!ok) return { error: 'Could not update your password. Please try again.' }
+
+  // Reissue a session without the reset flag so the portal is usable again.
+  await createSession({ sub: session.sub, role: session.role, name: session.name })
+  redirect(session.role === 'tenant' ? '/tenants' : '/partners')
 }
 
 export async function logout(): Promise<void> {

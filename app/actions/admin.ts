@@ -11,7 +11,7 @@ import {
   listPropertiesByPartner,
   getPropertyById,
 } from '@/lib/properties'
-import { updatePartner, deletePartner, findPartnerById } from '@/lib/users'
+import { updatePartner, deletePartner, findPartnerById, resetUserPassword } from '@/lib/users'
 import {
   approveTenant,
   rejectTenant,
@@ -30,7 +30,7 @@ import {
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
 import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
-import { sendApprovalEmail } from '@/lib/email'
+import { sendApprovalEmail, sendWelcomeBackEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 
 export type AdminActionState = { error?: string } | undefined
@@ -307,6 +307,38 @@ export async function rejectTenantAction(_prev: AdminActionState, formData: Form
   revalidatePath('/admin/tenants')
   revalidatePath(`/admin/tenants/${id}`)
   return undefined
+}
+
+// ---- Account access (welcome / welcome-back emails) ----
+
+/**
+ * Issue a fresh temporary password for a tenant or partner user and email it to
+ * them with sign-in instructions. Helps set up imported users (who have no usable
+ * password) and refresh anyone who missed steps or lost their password. The user
+ * is forced to choose a new password on next sign-in.
+ */
+export async function resendWelcomeEmailAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const userId = String(formData.get('userId') ?? '').trim()
+  const returnTo = String(formData.get('returnTo') ?? '').trim()
+  // Only allow returning to an admin path (no open redirect).
+  const dest = returnTo.startsWith('/admin/') ? returnTo : '/admin/tenants'
+
+  const reset = await resetUserPassword(userId)
+  if (!reset) redirect(`${dest}?welcome=notfound`)
+
+  let sent = true
+  try {
+    await sendWelcomeBackEmail({
+      to: reset.email,
+      name: reset.name,
+      tempPassword: reset.tempPassword,
+      role: reset.role,
+    })
+  } catch {
+    sent = false
+  }
+  redirect(`${dest}?welcome=${sent ? 'sent' : 'failed'}`)
 }
 
 // ---- Rent collection setup (admin-driven, after income is verified) ----

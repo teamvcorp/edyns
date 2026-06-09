@@ -49,6 +49,35 @@ export async function sendCredentialsEmail(input: {
 }
 
 /**
+ * Welcome-back / account-recovery email: issues a fresh temporary password and a
+ * sign-in link. Sent when an admin sets up an imported user or refreshes someone
+ * who missed steps or lost their password. The user is prompted to choose a new
+ * password the moment they sign in.
+ */
+export async function sendWelcomeBackEmail(input: {
+  to: string
+  name: string
+  tempPassword: string
+  role: 'tenant' | 'partner'
+}): Promise<void> {
+  const loginUrl = `${baseUrl}/${input.role === 'tenant' ? 'tenants' : 'partners'}/login`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Welcome back, ${escapeHtml(input.name)}</h2>
+      <p>We’ve set a temporary password on your edynsgate account so you can sign in:</p>
+      <p style="background:#f3f3ee;border-radius:8px;padding:12px 16px">
+        <strong>Email:</strong> ${escapeHtml(input.to)}<br/>
+        <strong>Temporary password:</strong> ${escapeHtml(input.tempPassword)}
+      </p>
+      <p>When you sign in you’ll be asked to <strong>choose a new password</strong> before continuing.</p>
+      <p><a href="${loginUrl}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Sign in</a></p>
+      <p style="color:#6b6b60;font-size:13px">If you didn’t expect this email, please contact us.</p>
+    </div>`
+
+  await sendEmail({ to: input.to, subject: 'Your edynsgate sign-in details', html })
+}
+
+/**
  * Approval email: the tenant is approved and must finish income verification
  * (connect a bank via Plaid OR upload their most recent paystub) before we set
  * up rent collection.
