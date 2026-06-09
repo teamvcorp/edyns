@@ -3,10 +3,16 @@
 import { redirect } from 'next/navigation'
 import { createSession, deleteSession } from '@/lib/session'
 import { verifyCredentials } from '@/lib/users'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export type AuthState = { error?: string } | undefined
 
 const portalFor = { partner: '/partners', tenant: '/tenants' } as const
+
+// Credential-stuffing throttle: cap login attempts per IP in a rolling window.
+const LOGIN_LIMIT = 10
+const LOGIN_WINDOW_MS = 15 * 60 * 1000
+const TOO_MANY = 'Too many attempts. Please wait a few minutes and try again.'
 
 async function loginWithCredentials(
   role: 'partner' | 'tenant',
@@ -18,6 +24,10 @@ async function loginWithCredentials(
   if (!email || !password) {
     return { error: 'Enter your email and password.' }
   }
+
+  const ip = await getClientIp()
+  const { allowed } = await rateLimit({ key: `login:${role}:${ip}`, limit: LOGIN_LIMIT, windowMs: LOGIN_WINDOW_MS })
+  if (!allowed) return { error: TOO_MANY }
 
   const user = await verifyCredentials(email, password, role)
   if (!user) {
@@ -43,6 +53,11 @@ export async function loginAdmin(_prev: AuthState, formData: FormData): Promise<
   if (!expected) {
     return { error: 'Admin access is not configured.' }
   }
+
+  const ip = await getClientIp()
+  const { allowed } = await rateLimit({ key: `login:admin:${ip}`, limit: LOGIN_LIMIT, windowMs: LOGIN_WINDOW_MS })
+  if (!allowed) return { error: TOO_MANY }
+
   if (!password || password !== expected) {
     return { error: 'Incorrect password.' }
   }

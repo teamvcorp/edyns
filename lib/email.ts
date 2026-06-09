@@ -71,6 +71,23 @@ export async function sendApprovalEmail(input: { to: string; name: string }): Pr
   await sendEmail({ to: input.to, subject: 'You’re approved — one last step', html })
 }
 
+/**
+ * Internal security alert (e.g., suspicious bank-link velocity). Sent to
+ * ALERT_EMAIL, falling back to FROM_EMAIL. Best-effort — callers should not let
+ * a failed alert break the user flow.
+ */
+export async function sendSecurityAlert(input: { subject: string; body: string }): Promise<void> {
+  const to = process.env.ALERT_EMAIL ?? process.env.FROM_EMAIL
+  if (!to) return
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Security alert</h2>
+      <p>${escapeHtml(input.body)}</p>
+      <p style="color:#6b6b60;font-size:13px">Automated alert from edynsgate.</p>
+    </div>`
+  await sendEmail({ to, subject: `[edynsgate security] ${input.subject}`, html })
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }

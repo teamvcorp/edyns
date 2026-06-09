@@ -15,6 +15,7 @@ import {
   type Person,
 } from '@/lib/tenants'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
 export type TenantEnrollState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string }
@@ -22,6 +23,10 @@ export type TenantEnrollState =
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
+
+// Account-creation throttle: cap new applications per IP in a rolling window.
+const SIGNUP_LIMIT = 5
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000
 
 function num(v: string): number | null {
   if (v.trim() === '') return null
@@ -72,6 +77,12 @@ async function startFeeCheckout(opts: { userId: string; email: string; customerI
 }
 
 export async function enrollTenant(_prev: TenantEnrollState, formData: FormData): Promise<TenantEnrollState> {
+  const ip = await getClientIp()
+  const { allowed } = await rateLimit({ key: `signup:tenant:${ip}`, limit: SIGNUP_LIMIT, windowMs: SIGNUP_WINDOW_MS })
+  if (!allowed) {
+    return { message: 'Too many applications from this network. Please try again later.' }
+  }
+
   const get = (k: string) => String(formData.get(k) ?? '').trim()
 
   const fields = [

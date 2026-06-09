@@ -79,6 +79,12 @@ export interface TenantDoc {
   idNumberLast4?: string
   /** Manually uploaded paystub — alternative to Plaid for income verification. */
   paystub?: { url: string; uploadedAt: Date }
+  /** Bank-link velocity monitoring (Plaid): number of completed link attempts. */
+  plaidLinkCount?: number
+  /** Set when automated checks flag this application for manual security review. */
+  flaggedForReview?: boolean
+  reviewReason?: string
+  flaggedAt?: Date
   /** Recurring rent collection (40% of income) via Stripe. */
   billing?: Billing
   /** Tenants start at tier 0 on approval and move up as they relocate. */
@@ -214,6 +220,26 @@ export async function savePlaidVerification(
   }
   if (input.verifiedMonthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
+}
+
+/** Increment and return the tenant's Plaid link counter (bank-link velocity monitoring). */
+export async function recordPlaidLink(userId: string): Promise<number> {
+  const col = await tenantsCollection()
+  const doc = await col.findOneAndUpdate(
+    { userId: new ObjectId(userId) },
+    { $inc: { plaidLinkCount: 1 }, $set: { updatedAt: new Date() } },
+    { returnDocument: 'after' },
+  )
+  return doc?.plaidLinkCount ?? 1
+}
+
+/** Flag a tenant for manual security review (review queue). */
+export async function flagTenantForReview(userId: string, reason: string): Promise<void> {
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { userId: new ObjectId(userId) },
+    { $set: { flaggedForReview: true, reviewReason: reason, flaggedAt: new Date(), updatedAt: new Date() } },
+  )
 }
 
 /** Save a manually uploaded paystub (alternative to Plaid). Income is confirmed by the admin. */

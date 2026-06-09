@@ -26,7 +26,14 @@ export default async function AdminTenantsPage({
   const Row = ({ t }: { t: (typeof tenants)[number] }) => (
     <Card className="flex flex-wrap items-center justify-between gap-4 py-5">
       <div className="flex flex-col">
-        <span className="font-medium text-olive-950 dark:text-white">{t.name}</span>
+        <span className="font-medium text-olive-950 dark:text-white">
+          {t.name}
+          {t.flaggedForReview && (
+            <span className="ml-2 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-semibold text-red-700 dark:text-red-400">
+              ⚠️ Review
+            </span>
+          )}
+        </span>
         <span className="text-sm text-olive-600 dark:text-olive-500">
           {t.email} · household of {1 + t.adults.length + t.children.length}
         </span>

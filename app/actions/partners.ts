@@ -3,6 +3,11 @@
 import { redirect } from 'next/navigation'
 import { createSession } from '@/lib/session'
 import { isEmailTaken, registerPartner } from '@/lib/users'
+import { rateLimit, getClientIp } from '@/lib/ratelimit'
+
+// Account-creation throttle: cap new partner accounts per IP in a rolling window.
+const SIGNUP_LIMIT = 5
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000
 
 export type EnrollState =
   | {
@@ -29,6 +34,12 @@ const echoFields = [
 ] as const
 
 export async function enrollPartner(_prev: EnrollState, formData: FormData): Promise<EnrollState> {
+  const ip = await getClientIp()
+  const { allowed } = await rateLimit({ key: `signup:partner:${ip}`, limit: SIGNUP_LIMIT, windowMs: SIGNUP_WINDOW_MS })
+  if (!allowed) {
+    return { message: 'Too many sign-ups from this network. Please try again later.' }
+  }
+
   const get = (k: string) => String(formData.get(k) ?? '').trim()
   const values: Record<string, string> = {}
   for (const f of echoFields) values[f] = get(f)

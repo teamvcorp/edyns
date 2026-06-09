@@ -41,6 +41,13 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
           <Link href="/admin/tenants">← Back to tenant applications</Link>
         </div>
 
+        {t.flaggedForReview && (
+          <div className="rounded-xl bg-red-500/10 px-4 py-3 ring-1 ring-red-500/30">
+            <p className="text-sm font-semibold text-red-700 dark:text-red-400">⚠️ Flagged for security review</p>
+            {t.reviewReason && <p className="text-sm text-red-700 dark:text-red-400">{t.reviewReason}</p>}
+          </div>
+        )}
+
         <Card className="flex flex-col gap-4">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Head of household</h3>
           <dl className="grid gap-4 sm:grid-cols-2">
