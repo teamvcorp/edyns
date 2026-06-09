@@ -18,7 +18,10 @@ import {
   placeTenant,
   unplaceTenant,
   getTenantById,
+  getTenantBySubscriptionId,
+  attachStripeCustomer,
   setBilling,
+  clearBilling,
   setNextIncomeCheck,
   setEmploymentTypeById,
   resumeBilling,
@@ -26,7 +29,7 @@ import {
 } from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
 import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
-import { getStripe, withProcessingFee } from '@/lib/stripe'
+import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
 import { sendApprovalEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 
@@ -430,6 +433,96 @@ export async function resumeTenantBillingAction(formData: FormData): Promise<voi
   }
   revalidatePath('/admin/tenants')
   revalidatePath(`/admin/tenants/${id}`)
+  redirect(`/admin/tenants/${id}`)
+}
+
+// ---- Importing manually-created Stripe subscriptions (one-off tenants) ----
+
+export type StripeLookupState =
+  | { subscriptionId: string; data: ImportedSubscription }
+  | { error: string }
+  | undefined
+
+/** Preview an existing Stripe subscription before importing it. Read-only. */
+export async function lookupStripeSubscriptionAction(
+  _prev: StripeLookupState,
+  formData: FormData,
+): Promise<StripeLookupState> {
+  await requireRole('admin', '/admin/login')
+  const subscriptionId = String(formData.get('subscriptionId') ?? '').trim()
+  if (!subscriptionId) return { error: 'Paste the Stripe subscription id.' }
+
+  const existing = await getTenantBySubscriptionId(subscriptionId)
+  if (existing) return { error: `That subscription is already linked to ${existing.name}.` }
+
+  const result = await fetchSubscriptionForImport(subscriptionId)
+  if (!result.ok) return { error: result.error }
+  return { subscriptionId, data: result.data }
+}
+
+/**
+ * Commit the import: record the existing subscription as the tenant's rent billing,
+ * mark them approved (they're already paying), and place them at the chosen property.
+ */
+export async function importStripeSubscriptionAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const tenantId = String(formData.get('tenantId') ?? '').trim()
+  const subscriptionId = String(formData.get('subscriptionId') ?? '').trim()
+  const propertyId = String(formData.get('propertyId') ?? '').trim()
+  if (!tenantId || !subscriptionId || !propertyId) redirect('/admin/tenants/import?error=missing')
+
+  const tenant = await getTenantById(tenantId)
+  if (!tenant) redirect('/admin/tenants/import?error=tenant')
+  if (tenant.billing) redirect(`/admin/tenants/${tenantId}?error=already-billed`)
+
+  if (await getTenantBySubscriptionId(subscriptionId)) redirect('/admin/tenants/import?error=linked')
+
+  const result = await fetchSubscriptionForImport(subscriptionId)
+  if (!result.ok) redirect('/admin/tenants/import?error=stripe')
+
+  const property = await getPropertyById(propertyId)
+  if (!property || property.status !== 'approved') redirect('/admin/tenants/import?error=property')
+
+  await attachStripeCustomer(tenant.userId, result.data.customerId)
+  await setBilling(tenant.userId, {
+    amountCents: result.data.amountCents,
+    baseAmountCents: result.data.amountCents,
+    frequency: result.data.frequency,
+    stripeSubscriptionId: subscriptionId,
+    status: result.data.status,
+    firstDraftAt: result.data.nextDraftAt,
+    startedAt: new Date(),
+    imported: true,
+  })
+  await approveTenant(tenantId)
+  await placeTenant(tenantId, propertyId, property.tier ?? 0, property.address)
+
+  revalidatePath('/admin/tenants')
+  revalidatePath(`/admin/tenants/${tenantId}`)
+  revalidatePath('/tenants')
+  redirect(`/admin/tenants/${tenantId}`)
+}
+
+/**
+ * Replace an imported subscription with the normal 40% model: cancel the imported
+ * subscription in Stripe and clear the billing record, returning the tenant to the
+ * standard rent-setup state so the admin can start the 40% subscription.
+ */
+export async function replaceImportedWithBillingAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '').trim()
+  const tenant = await getTenantById(id)
+  if (tenant?.billing?.imported) {
+    try {
+      await getStripe().subscriptions.cancel(tenant.billing.stripeSubscriptionId)
+    } catch {
+      /* already canceled / missing in Stripe — clear our record regardless */
+    }
+    await clearBilling(id)
+  }
+  revalidatePath('/admin/tenants')
+  revalidatePath(`/admin/tenants/${id}`)
+  revalidatePath('/tenants')
   redirect(`/admin/tenants/${id}`)
 }
 

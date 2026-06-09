@@ -10,8 +10,8 @@ import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
-import { resumeTenantBillingAction } from '@/app/actions/admin'
-import { Button } from '@/components/elements/button'
+import { resumeTenantBillingAction, replaceImportedWithBillingAction } from '@/app/actions/admin'
+import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 
@@ -225,6 +225,23 @@ export default async function AdminTenantReviewPage({ params }: { params: Promis
                   <Row label="Status" value={t.billing.status} />
                   <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
                 </dl>
+                {t.billing.imported && (
+                  <div className="flex flex-col items-start gap-2 rounded-lg bg-olive-950/5 p-3 dark:bg-white/5">
+                    <span className="rounded-full bg-olive-950/10 px-2 py-0.5 text-xs font-semibold text-olive-700 dark:bg-white/10 dark:text-olive-300">
+                      Imported from Stripe
+                    </span>
+                    <p className="text-sm text-olive-600 dark:text-olive-500">
+                      Amount and schedule come from the existing Stripe subscription. Replacing with the 40% model cancels
+                      this subscription and returns the tenant to standard rent setup.
+                    </p>
+                    <form action={replaceImportedWithBillingAction}>
+                      <input type="hidden" name="id" value={t.id} />
+                      <SoftButton type="submit" className="text-red-600 dark:text-red-400">
+                        Replace with 40% model
+                      </SoftButton>
+                    </form>
+                  </div>
+                )}
                 {t.billing.status === 'paused' && (
                   <div className="flex flex-col gap-2 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
                     <p className="text-sm font-medium text-amber-800 dark:text-amber-300">

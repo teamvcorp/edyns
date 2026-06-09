@@ -1,16 +1,19 @@
 import type { Metadata } from 'next'
 import { requireRole } from '@/lib/dal'
 import { listTenants } from '@/lib/tenants'
+import { getPropertyById } from '@/lib/properties'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
-import { ButtonLink } from '@/components/elements/button'
+import { ButtonLink, PlainButtonLink } from '@/components/elements/button'
+import { formatAddress, formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Tenant applications' }
 
 const feeLabel = { unpaid: 'Fee unpaid', processing: 'Fee processing', paid: 'Fee paid' } as const
 const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' } as const
+const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
 
 export default async function AdminTenantsPage({
   searchParams,
@@ -21,7 +24,16 @@ export default async function AdminTenantsPage({
   const sp = await searchParams
   const tenants = await listTenants()
   const pending = tenants.filter((t) => t.status === 'pending')
-  const decided = tenants.filter((t) => t.status !== 'pending')
+  const stripePending = tenants.filter((t) => t.billing?.imported)
+  const decided = tenants.filter((t) => t.status !== 'pending' && !t.billing?.imported)
+
+  // Resolve the linked property for each imported tenant (small list).
+  const stripeRows = await Promise.all(
+    stripePending.map(async (t) => ({
+      t,
+      property: t.currentPropertyId ? await getPropertyById(t.currentPropertyId) : null,
+    })),
+  )
 
   const Row = ({ t }: { t: (typeof tenants)[number] }) => (
     <Card className="flex flex-wrap items-center justify-between gap-4 py-5">
@@ -60,7 +72,10 @@ export default async function AdminTenantsPage({
         ) : (
           <span />
         )}
-        <ButtonLink href="/admin/tenants/new">Add tenant</ButtonLink>
+        <div className="flex items-center gap-2">
+          <PlainButtonLink href="/admin/tenants/import">Import from Stripe</PlainButtonLink>
+          <ButtonLink href="/admin/tenants/new">Add tenant</ButtonLink>
+        </div>
       </div>
 
       <div className="flex flex-col gap-6">
@@ -75,6 +90,39 @@ export default async function AdminTenantsPage({
           <div className="flex flex-col gap-3">{pending.map((t) => <Row key={t.id} t={t} />)}</div>
         )}
       </div>
+
+      {stripeRows.length > 0 && (
+        <div className="flex flex-col gap-6">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
+              Stripe pending ({stripeRows.length})
+            </h3>
+            <Text className="text-sm/6">
+              <p>Subscriptions imported from Stripe — active and paying. Confirm each is linked to the right property.</p>
+            </Text>
+          </div>
+          <div className="flex flex-col gap-3">
+            {stripeRows.map(({ t, property }) => (
+              <Card key={t.id} className="flex flex-wrap items-center justify-between gap-4 py-5">
+                <div className="flex flex-col">
+                  <span className="font-medium text-olive-950 dark:text-white">{t.name}</span>
+                  <span className="text-sm text-olive-600 dark:text-olive-500">
+                    {t.email} · {property ? formatAddress(property.address) : 'No property linked'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-6">
+                  {t.billing && (
+                    <span className="text-sm text-olive-600 dark:text-olive-500">
+                      {formatCurrency(t.billing.amountCents / 100)} {frequencyLabel[t.billing.frequency]}
+                    </span>
+                  )}
+                  <Link href={`/admin/tenants/${t.id}`}>Review</Link>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {decided.length > 0 && (
         <div className="flex flex-col gap-6">
