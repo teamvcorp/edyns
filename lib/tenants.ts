@@ -198,6 +198,17 @@ export async function getTenantBySubscriptionId(subscriptionId: string): Promise
   return doc ? toTenant(doc) : null
 }
 
+/** True if a tenant is placed at this property with active rent billing (i.e. rented). */
+export async function isPropertyRented(propertyId: string): Promise<boolean> {
+  if (!ObjectId.isValid(propertyId)) return false
+  const col = await tenantsCollection()
+  const doc = await col.findOne({
+    currentPropertyId: new ObjectId(propertyId),
+    'billing.status': 'active',
+  })
+  return doc !== null
+}
+
 export async function attachStripeCustomer(userId: string, customerId: string): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: { stripeCustomerId: customerId, updatedAt: new Date() } })

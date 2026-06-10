@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation'
 import { requireRole } from '@/lib/dal'
 import { findPartnerById } from '@/lib/users'
 import { listPropertiesByPartner } from '@/lib/properties'
-import { deletePartnerAction, resendWelcomeEmailAction } from '@/app/actions/admin'
+import { totalEquityCentsByPartner } from '@/lib/equity'
+import { totalPaidCentsByPartner, pendingCentsByPartner } from '@/lib/payouts'
+import { deletePartnerAction, resendWelcomeEmailAction, forcePayoutAction } from '@/app/actions/admin'
 import { Container } from '@/components/elements/container'
 import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
@@ -11,7 +13,7 @@ import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
 import { Breadcrumbs } from '@/components/elements/breadcrumbs'
-import { SoftButton } from '@/components/elements/button'
+import { Button, SoftButton } from '@/components/elements/button'
 import { PartnerEditForm } from '@/components/admin/partner-edit-form'
 import { StatusBadge } from '@/components/partners/status-badge'
 import { formatAddress, formatCurrency } from '@/lib/format'
@@ -24,22 +26,37 @@ const welcomeCopy: Record<string, string> = {
   notfound: 'Could not find that user account.',
 }
 
+const payoutCopy: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
+  paid: { text: 'Payout sent to the partner’s connected account.', tone: 'ok' },
+  nothing: { text: 'No available balance to pay out.', tone: 'warn' },
+  'no-account': { text: 'Partner has no connected Stripe account for payouts.', tone: 'warn' },
+  'transfer-failed': { text: 'Stripe transfer failed — the account may not be payout-enabled.', tone: 'warn' },
+}
+
 export default async function AdminPartnerEditPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ error?: string; welcome?: string }>
+  searchParams: Promise<{ error?: string; welcome?: string; payout?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { error, welcome } = await searchParams
+  const { error, welcome, payout } = await searchParams
 
   const partner = await findPartnerById(id)
   if (!partner) notFound()
 
   const properties = await listPropertiesByPartner(id)
   const hasProperties = properties.length > 0
+
+  const [totalEquityCents, paidCents, pendingCents] = await Promise.all([
+    totalEquityCentsByPartner(id),
+    totalPaidCentsByPartner(id),
+    pendingCentsByPartner(id),
+  ])
+  const availableCents = Math.max(0, totalEquityCents - paidCents - pendingCents)
+  const payoutInfo = payout ? payoutCopy[payout] : undefined
 
   return (
     <section className="py-16">
@@ -86,6 +103,46 @@ export default async function AdminPartnerEditPage({
             <SoftButton type="submit" className="w-fit">
               Resend welcome email
             </SoftButton>
+          </form>
+        </Card>
+
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Payouts</h3>
+          {payoutInfo && (
+            <p
+              role="status"
+              className={
+                payoutInfo.tone === 'ok'
+                  ? 'text-sm text-olive-700 dark:text-olive-300'
+                  : 'text-sm text-red-600 dark:text-red-400'
+              }
+            >
+              {payoutInfo.text}
+            </p>
+          )}
+          <dl className="grid gap-4 sm:grid-cols-3">
+            <div className="flex flex-col">
+              <dt className="text-sm text-olive-600 dark:text-olive-500">Total equity</dt>
+              <dd className="text-olive-950 dark:text-white">{formatCurrency(totalEquityCents / 100)}</dd>
+            </div>
+            <div className="flex flex-col">
+              <dt className="text-sm text-olive-600 dark:text-olive-500">Paid + pending</dt>
+              <dd className="text-olive-950 dark:text-white">{formatCurrency((paidCents + pendingCents) / 100)}</dd>
+            </div>
+            <div className="flex flex-col">
+              <dt className="text-sm text-olive-600 dark:text-olive-500">Available</dt>
+              <dd className="text-olive-950 dark:text-white">{formatCurrency(availableCents / 100)}</dd>
+            </div>
+          </dl>
+          <p className="text-sm text-olive-600 dark:text-olive-500">
+            Force a payout of the partner’s full available balance to their connected account. Available resets to zero;
+            lifetime equity is unchanged.
+          </p>
+          <form action={forcePayoutAction}>
+            <input type="hidden" name="partnerId" value={partner.id} />
+            <Button type="submit" disabled={availableCents <= 0} className="w-fit disabled:opacity-60">
+              Force payout
+            </Button>
           </form>
         </Card>
 

@@ -116,6 +116,14 @@ export function PropertyEditForm({ property }: { property: Property }) {
             initial={property.incomeRequirement}
             required={false}
           />
+          <Field
+            label="Partner equity share (% of rent)"
+            name="equitySharePercent"
+            type="number"
+            state={state}
+            initial={property.equitySharePercent ?? 10}
+            required={false}
+          />
         </div>
       </fieldset>
 

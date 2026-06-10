@@ -121,6 +121,23 @@ export function PropertyReviewCard({ property }: { property: Property }) {
                 <input type="number" name="incomeRequirement" inputMode="numeric" placeholder="e.g. 2500" className={`mt-1 ${inputClass}`} />
               </label>
             </div>
+            <label className="text-sm font-medium text-olive-950 dark:text-white">
+              Partner equity share (% of rent)
+              <input
+                type="number"
+                name="equitySharePercent"
+                inputMode="numeric"
+                min={0}
+                max={100}
+                step="0.1"
+                defaultValue={10}
+                placeholder="e.g. 10"
+                className={`mt-1 ${inputClass}`}
+              />
+              <span className="mt-1 block text-xs font-normal text-olive-600 dark:text-olive-500">
+                Percent of each rent payment credited to the partner as equity.
+              </span>
+            </label>
             {approveState?.error && (
               <span role="alert" className="text-xs text-red-600 dark:text-red-400">
                 {approveState.error}

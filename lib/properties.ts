@@ -21,6 +21,11 @@ export interface PropertyDoc {
   askingPrice: number
   /** Set by an admin at approval — what the partner will receive on cash-out. */
   equityGenerated?: number
+  /**
+   * Percent of each rent payment credited to the partner as equity. Admin-set per
+   * property; applied by the Stripe webhook when rent is collected. Defaults to 10.
+   */
+  equitySharePercent?: number
   /** Housing tier (0-5). Admin sets this before approving. */
   tier?: number
   /** Minimum tenant monthly income (USD) required to move into this property. */
@@ -48,6 +53,7 @@ export interface PropertyInput {
   askingPrice: number
   tier?: number
   incomeRequirement?: number
+  equitySharePercent?: number
 }
 
 async function propertiesCollection(): Promise<Collection<PropertyDoc>> {
@@ -129,7 +135,7 @@ export async function listApprovedProperties(filter?: { zip?: string; tier?: num
 
 export async function approveProperty(
   id: string,
-  opts: { equityGenerated: number; tier: number; incomeRequirement: number },
+  opts: { equityGenerated: number; tier: number; incomeRequirement: number; equitySharePercent: number },
 ): Promise<boolean> {
   if (!ObjectId.isValid(id)) return false
   const col = await propertiesCollection()
@@ -141,6 +147,7 @@ export async function approveProperty(
         equityGenerated: opts.equityGenerated,
         tier: opts.tier,
         incomeRequirement: opts.incomeRequirement,
+        equitySharePercent: opts.equitySharePercent,
         approvedAt: new Date(),
         updatedAt: new Date(),
       },
@@ -163,7 +170,7 @@ export async function rejectProperty(id: string, reason: string): Promise<boolea
 /** Admin edit of any property field (including status & equity). */
 export async function updateProperty(
   id: string,
-  input: PropertyInput & { status: PropertyStatus; equityGenerated?: number },
+  input: PropertyInput & { status: PropertyStatus; equityGenerated?: number; equitySharePercent?: number },
 ): Promise<boolean> {
   if (!ObjectId.isValid(id)) return false
   const col = await propertiesCollection()

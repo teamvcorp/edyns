@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { requireRole } from '@/lib/dal'
 import { findPartnerById } from '@/lib/users'
 import { listPropertiesByPartner } from '@/lib/properties'
+import { totalEquityCentsByPartner } from '@/lib/equity'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -13,9 +14,10 @@ export const metadata: Metadata = { title: 'Partner portal' }
 
 export default async function PartnerPortalPage() {
   const session = await requireRole('partner', '/partners/login')
-  const [profile, properties] = await Promise.all([
+  const [profile, properties, totalEquityCents] = await Promise.all([
     findPartnerById(session.sub),
     listPropertiesByPartner(session.sub),
+    totalEquityCentsByPartner(session.sub),
   ])
 
   const counts = {
@@ -23,9 +25,7 @@ export default async function PartnerPortalPage() {
     pending: properties.filter((p) => p.status === 'pending').length,
     approved: properties.filter((p) => p.status === 'approved').length,
   }
-  const totalEquity = properties
-    .filter((p) => p.status === 'approved')
-    .reduce((sum, p) => sum + (p.equityGenerated ?? 0), 0)
+  const totalEquity = totalEquityCents / 100
 
   return (
     <PortalShell eyebrow="Partner portal" title={`Welcome, ${session.name ?? 'partner'}`}>

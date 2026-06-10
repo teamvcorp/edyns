@@ -117,6 +117,57 @@ export async function sendSecurityAlert(input: { subject: string; body: string }
   await sendEmail({ to, subject: `[edynsgate security] ${input.subject}`, html })
 }
 
+/** Partner equity report for one property: YTD + lifetime totals and a line per payment. */
+export async function sendEquityReportEmail(input: {
+  to: string
+  name: string
+  propertyLabel: string
+  entries: { rentCents: number; sharePercent: number; equityCents: number; paidAt: Date }[]
+  ytdCents: number
+  lifetimeCents: number
+}): Promise<void> {
+  const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`
+  const year = new Date().getFullYear()
+  const rows =
+    input.entries.length === 0
+      ? `<tr><td colspan="4" style="padding:8px;color:#6b6b60">No rent equity recorded yet.</td></tr>`
+      : input.entries
+          .map(
+            (e) => `
+        <tr>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd">${new Date(e.paidAt).toLocaleDateString()}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${usd(e.rentCents)}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${e.sharePercent}%</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${usd(e.equityCents)}</td>
+        </tr>`,
+          )
+          .join('')
+
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Equity report — ${escapeHtml(input.propertyLabel)}</h2>
+      <p>Hi ${escapeHtml(input.name)}, here’s the equity this property has generated from rent.</p>
+      <p style="background:#f3f3ee;border-radius:8px;padding:12px 16px">
+        <strong>Year to date (${year}):</strong> ${usd(input.ytdCents)}<br/>
+        <strong>All time:</strong> ${usd(input.lifetimeCents)}
+      </p>
+      <table style="border-collapse:collapse;width:100%;font-size:14px">
+        <thead>
+          <tr style="text-align:left;color:#6b6b60">
+            <th style="padding:6px 8px">Date</th>
+            <th style="padding:6px 8px;text-align:right">Rent</th>
+            <th style="padding:6px 8px;text-align:right">Share</th>
+            <th style="padding:6px 8px;text-align:right">Equity</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+      <p style="color:#6b6b60;font-size:13px">Equity accrues from each rent payment while the property is rented.</p>
+    </div>`
+
+  await sendEmail({ to: input.to, subject: `Equity report — ${input.propertyLabel}`, html })
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }

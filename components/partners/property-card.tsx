@@ -2,12 +2,23 @@ import Image from 'next/image'
 import { Card } from '@/components/elements/card'
 import { PlainButton } from '@/components/elements/button'
 import { StatusBadge } from './status-badge'
+import { EquityReportModal } from './equity-report-modal'
 import { deleteProperty } from '@/app/actions/properties'
 import { formatCurrency, formatNumber, formatAddress } from '@/lib/format'
 import type { Property } from '@/lib/properties'
+import type { RentEquityEntry } from '@/lib/equity'
 
-export function PropertyCard({ property }: { property: Property }) {
+export function PropertyCard({
+  property,
+  rented = false,
+  equityEntries = [],
+}: {
+  property: Property
+  rented?: boolean
+  equityEntries?: RentEquityEntry[]
+}) {
   const canDelete = property.status === 'pending'
+  const equityCents = equityEntries.reduce((sum, e) => sum + e.equityCents, 0)
 
   return (
     <Card className="flex flex-col gap-4 p-0 ring-1">
@@ -20,6 +31,13 @@ export function PropertyCard({ property }: { property: Property }) {
         <div className="absolute left-3 top-3">
           <StatusBadge status={property.status} />
         </div>
+        {rented && (
+          <div className="absolute right-3 top-3">
+            <span className="rounded-full bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm">
+              Rented
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-4 p-6 pt-2">
@@ -55,12 +73,18 @@ export function PropertyCard({ property }: { property: Property }) {
           <div className="col-span-2">
             <dt className="text-olive-600 dark:text-olive-500">Equity generated</dt>
             <dd className="text-olive-950 dark:text-white">
-              {property.status === 'approved'
-                ? formatCurrency(property.equityGenerated)
-                : 'Set after approval'}
+              {property.status === 'approved' ? formatCurrency(equityCents / 100) : 'Accrues once rented'}
             </dd>
           </div>
         </dl>
+
+        {property.status === 'approved' && (
+          <EquityReportModal
+            propertyId={property.id}
+            propertyLabel={formatAddress(property.address)}
+            entries={equityEntries}
+          />
+        )}
 
         {property.status === 'rejected' && property.rejectionReason && (
           <p className="text-sm text-red-600 dark:text-red-400">Reason: {property.rejectionReason}</p>

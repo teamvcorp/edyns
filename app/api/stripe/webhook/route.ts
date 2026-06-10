@@ -1,6 +1,49 @@
 import Stripe from 'stripe'
 import { getStripe } from '@/lib/stripe'
-import { applyFeeResult, setBillingStatusBySubscription, type BillingStatus } from '@/lib/tenants'
+import {
+  applyFeeResult,
+  setBillingStatusBySubscription,
+  getTenantBySubscriptionId,
+  type BillingStatus,
+} from '@/lib/tenants'
+import { getPropertyById } from '@/lib/properties'
+import { recordRentEquity } from '@/lib/equity'
+
+/** Default partner equity share when a property hasn't set one. */
+const DEFAULT_EQUITY_SHARE_PERCENT = 10
+
+/**
+ * Credit the partner's rent-equity ledger for a paid rent invoice: an admin-set
+ * percentage of the rent (per property) becomes partner equity. Best-effort and
+ * idempotent (keyed on the invoice id) — never blocks the webhook response.
+ */
+async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionId: string): Promise<void> {
+  const rentCents = invoice.amount_paid
+  if (!invoice.id || !rentCents || rentCents <= 0) return
+
+  const tenant = await getTenantBySubscriptionId(subscriptionId)
+  if (!tenant?.currentPropertyId) return
+
+  const property = await getPropertyById(tenant.currentPropertyId)
+  if (!property) return
+
+  const sharePercent = property.equitySharePercent ?? DEFAULT_EQUITY_SHARE_PERCENT
+  if (sharePercent <= 0) return
+  const equityCents = Math.round((rentCents * sharePercent) / 100)
+  if (equityCents <= 0) return
+
+  const paidAtEpoch = invoice.status_transitions?.paid_at ?? invoice.created
+  await recordRentEquity({
+    partnerId: property.partnerId,
+    propertyId: property.id,
+    tenantId: tenant.id,
+    stripeInvoiceId: invoice.id,
+    rentCents,
+    sharePercent,
+    equityCents,
+    paidAt: new Date(paidAtEpoch * 1000),
+  })
+}
 
 /** Map a Stripe subscription status to our billing status. */
 function mapSubscriptionStatus(s: Stripe.Subscription.Status): BillingStatus | null {
@@ -63,8 +106,16 @@ export async function POST(request: Request): Promise<Response> {
     const sub = event.data.object as Stripe.Subscription
     await setBillingStatusBySubscription(sub.id, 'canceled')
   } else if (event.type === 'invoice.paid') {
-    const subId = invoiceSubscriptionId(event.data.object as Stripe.Invoice)
-    if (subId) await setBillingStatusBySubscription(subId, 'active')
+    const invoice = event.data.object as Stripe.Invoice
+    const subId = invoiceSubscriptionId(invoice)
+    if (subId) {
+      await setBillingStatusBySubscription(subId, 'active')
+      try {
+        await recordRentEquityForInvoice(invoice, subId)
+      } catch {
+        /* equity crediting is best-effort — never fail the webhook over it */
+      }
+    }
   } else if (event.type === 'invoice.payment_failed') {
     const subId = invoiceSubscriptionId(event.data.object as Stripe.Invoice)
     if (subId) await setBillingStatusBySubscription(subId, 'past_due')

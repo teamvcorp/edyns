@@ -10,7 +10,7 @@ import {
   setPayoutFrequency,
   type PayoutFrequency,
 } from '@/lib/users'
-import { totalEquityByPartner } from '@/lib/properties'
+import { totalEquityCentsByPartner } from '@/lib/equity'
 import { totalPaidCentsByPartner, pendingCentsByPartner, hasPendingRequest, createPayoutRequest } from '@/lib/payouts'
 
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
@@ -107,10 +107,10 @@ export async function requestPayout(): Promise<void> {
 
   if (await hasPendingRequest(session.sub)) redirect('/partners/payouts')
 
-  const totalEquity = await totalEquityByPartner(session.sub) // dollars
+  const totalEquityCents = await totalEquityCentsByPartner(session.sub)
   const paidCents = await totalPaidCentsByPartner(session.sub)
   const pending = await pendingCentsByPartner(session.sub)
-  const availableCents = Math.round(totalEquity * 100) - paidCents - pending
+  const availableCents = totalEquityCents - paidCents - pending
   if (availableCents <= 0) redirect('/partners/payouts')
 
   await createPayoutRequest(session.sub, availableCents)

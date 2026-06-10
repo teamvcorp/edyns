@@ -28,7 +28,15 @@ import {
   type BillingFrequency,
 } from '@/lib/tenants'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
-import { getPayoutById, markPayoutPaid, markPayoutDeclined } from '@/lib/payouts'
+import {
+  getPayoutById,
+  markPayoutPaid,
+  markPayoutDeclined,
+  createPaidPayout,
+  totalPaidCentsByPartner,
+  pendingCentsByPartner,
+} from '@/lib/payouts'
+import { totalEquityCentsByPartner } from '@/lib/equity'
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
@@ -42,6 +50,8 @@ export async function approvePropertyAction(_prev: AdminActionState, formData: F
   const equity = Number(String(formData.get('equityGenerated') ?? '').trim())
   const tier = Number(String(formData.get('tier') ?? '').trim())
   const incomeRequirement = Number(String(formData.get('incomeRequirement') ?? '').trim())
+  const shareRaw = String(formData.get('equitySharePercent') ?? '').trim()
+  const equitySharePercent = shareRaw === '' ? 10 : Number(shareRaw)
 
   if (!id) return { error: 'Missing property id.' }
   if (!Number.isFinite(equity) || equity < 0) {
@@ -53,8 +63,11 @@ export async function approvePropertyAction(_prev: AdminActionState, formData: F
   if (!Number.isFinite(incomeRequirement) || incomeRequirement < 0) {
     return { error: 'Enter the monthly income requirement.' }
   }
+  if (!Number.isFinite(equitySharePercent) || equitySharePercent < 0 || equitySharePercent > 100) {
+    return { error: 'Partner equity share must be a percent between 0 and 100.' }
+  }
 
-  const ok = await approveProperty(id, { equityGenerated: equity, tier, incomeRequirement })
+  const ok = await approveProperty(id, { equityGenerated: equity, tier, incomeRequirement, equitySharePercent })
   if (!ok) return { error: 'Property not found.' }
 
   revalidatePath('/admin/properties')
@@ -165,7 +178,7 @@ export async function updatePropertyAction(_prev: PropertyEditState, formData: F
     'line1', 'line2', 'city', 'state', 'postalCode', 'country',
     'bedrooms', 'bathrooms', 'squareFeet', 'lotSize', 'lat', 'lng',
     'assessedValue', 'askingPrice', 'status', 'equityGenerated', 'tier', 'incomeRequirement',
-    'thumbnailUrl', 'galleryUrls',
+    'equitySharePercent', 'thumbnailUrl', 'galleryUrls',
   ]
   const values: Record<string, string> = {}
   for (const f of fields) values[f] = get(f)
@@ -199,6 +212,10 @@ export async function updatePropertyAction(_prev: PropertyEditState, formData: F
   const equityGenerated = num(values.equityGenerated)
   const tier = num(values.tier)
   const incomeRequirement = num(values.incomeRequirement)
+  const equitySharePercent = num(values.equitySharePercent)
+  if (equitySharePercent !== null && (equitySharePercent < 0 || equitySharePercent > 100)) {
+    errors.equitySharePercent = 'Equity share must be between 0 and 100.'
+  }
   if (status === 'approved') {
     if (equityGenerated === null || equityGenerated < 0) {
       errors.equityGenerated = 'Set the equity generated for an approved property.'
@@ -245,6 +262,7 @@ export async function updatePropertyAction(_prev: PropertyEditState, formData: F
     incomeRequirement: incomeRequirement ?? undefined,
     status,
     equityGenerated: equityGenerated ?? undefined,
+    equitySharePercent: equitySharePercent ?? undefined,
   })
 
   if (!ok) return { message: 'Property not found.', values }
@@ -649,4 +667,50 @@ export async function declinePayoutAction(formData: FormData): Promise<void> {
   await markPayoutDeclined(id, note || 'Declined by admin.')
   revalidatePath('/admin/payouts')
   redirect('/admin/payouts')
+}
+
+/**
+ * Admin force payout: pay out a partner's full available balance immediately
+ * (ledger total − already paid − pending), transferring via Stripe Connect and
+ * recording a paid payout. Available drops to zero; lifetime equity is unchanged.
+ */
+export async function forcePayoutAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const partnerId = String(formData.get('partnerId') ?? '').trim()
+  const back = `/admin/partners/${partnerId}`
+
+  const partner = await findPartnerById(partnerId)
+  if (!partner?.stripeAccountId) redirect(`${back}?payout=no-account`)
+
+  const [totalCents, paidCents, pendingCents] = await Promise.all([
+    totalEquityCentsByPartner(partnerId),
+    totalPaidCentsByPartner(partnerId),
+    pendingCentsByPartner(partnerId),
+  ])
+  const availableCents = totalCents - paidCents - pendingCents
+  if (availableCents <= 0) redirect(`${back}?payout=nothing`)
+
+  // Execute the transfer; keep redirect() out of the try so it isn't swallowed.
+  let transferId: string | null = null
+  try {
+    const account = await getStripe().accounts.retrieve(partner!.stripeAccountId!)
+    if (account.payouts_enabled) {
+      const transfer = await getStripe().transfers.create({
+        amount: availableCents,
+        currency: 'usd',
+        destination: partner!.stripeAccountId!,
+        metadata: { partnerId, forced: 'true' },
+      })
+      transferId = transfer.id
+    }
+  } catch {
+    transferId = null
+  }
+
+  if (!transferId) redirect(`${back}?payout=transfer-failed`)
+
+  await createPaidPayout(partnerId, availableCents, transferId)
+  revalidatePath('/admin/payouts')
+  revalidatePath(back)
+  redirect(`${back}?payout=paid`)
 }

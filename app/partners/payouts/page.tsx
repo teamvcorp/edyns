@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import type Stripe from 'stripe'
 import { requireRole } from '@/lib/dal'
 import { findPartnerById } from '@/lib/users'
-import { totalEquityByPartner } from '@/lib/properties'
+import { totalEquityCentsByPartner } from '@/lib/equity'
 import { totalPaidCentsByPartner, pendingCentsByPartner, listPayoutsByPartner } from '@/lib/payouts'
 import { getStripe } from '@/lib/stripe'
 import { startConnectOnboarding, savePayoutFrequency, requestPayout } from '@/app/actions/payouts'
@@ -39,15 +39,15 @@ export default async function PartnerPayoutsPage({
   const session = await requireRole('partner', '/partners/login')
   const sp = await searchParams
 
-  const [partner, totalEquity, paidCents, pendingCents, payouts] = await Promise.all([
+  const [partner, totalEquityCents, paidCents, pendingCents, payouts] = await Promise.all([
     findPartnerById(session.sub),
-    totalEquityByPartner(session.sub),
+    totalEquityCentsByPartner(session.sub),
     totalPaidCentsByPartner(session.sub),
     pendingCentsByPartner(session.sub),
     listPayoutsByPartner(session.sub),
   ])
 
-  const availableCents = Math.max(0, Math.round(totalEquity * 100) - paidCents - pendingCents)
+  const availableCents = Math.max(0, totalEquityCents - paidCents - pendingCents)
   const hasPending = pendingCents > 0
 
   let account: Stripe.Account | null = null
@@ -96,7 +96,7 @@ export default async function PartnerPayoutsPage({
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <div>
               <dt className="text-sm text-olive-600 dark:text-olive-500">Total generated</dt>
-              <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCurrency(totalEquity)}</dd>
+              <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCurrency(totalEquityCents / 100)}</dd>
             </div>
             <div>
               <dt className="text-sm text-olive-600 dark:text-olive-500">Paid out</dt>

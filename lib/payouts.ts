@@ -59,6 +59,25 @@ export async function createPayoutRequest(partnerId: string, amountCents: number
   })
 }
 
+/** Record an already-paid payout (admin force payout — transfer done in the caller). */
+export async function createPaidPayout(
+  partnerId: string,
+  amountCents: number,
+  stripeTransferId: string,
+): Promise<void> {
+  const col = await payoutsCollection()
+  const now = new Date()
+  await col.insertOne({
+    _id: new ObjectId(),
+    partnerId: new ObjectId(partnerId),
+    amountCents,
+    status: 'paid',
+    stripeTransferId,
+    requestedAt: now,
+    decidedAt: now,
+  })
+}
+
 export async function hasPendingRequest(partnerId: string): Promise<boolean> {
   if (!ObjectId.isValid(partnerId)) return false
   const col = await payoutsCollection()
