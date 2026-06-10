@@ -130,6 +130,26 @@ export async function equityCentsByProperty(propertyId: string, since?: Date): P
   return sumEquity(match)
 }
 
+/**
+ * Re-price every equity entry for a property to a new share percentage. Used when
+ * an admin changes a property's equity share so the new rate applies immediately to
+ * all accrued equity (and therefore the partner's unsent/available balance), not
+ * just to future payments. Each entry's `equityCents` is recomputed from its
+ * recorded `rentCents`.
+ */
+export async function repricePropertyEquity(propertyId: string, sharePercent: number): Promise<void> {
+  if (!ObjectId.isValid(propertyId)) return
+  const col = await equityCollection()
+  await col.updateMany({ propertyId: new ObjectId(propertyId) }, [
+    {
+      $set: {
+        sharePercent,
+        equityCents: { $round: [{ $divide: [{ $multiply: ['$rentCents', sharePercent] }, 100] }, 0] },
+      },
+    },
+  ])
+}
+
 /** Equity ledger entries for one property, newest first (report + email). */
 export async function listEquityEntriesByProperty(propertyId: string): Promise<RentEquityEntry[]> {
   if (!ObjectId.isValid(propertyId)) return []

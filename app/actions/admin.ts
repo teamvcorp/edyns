@@ -37,7 +37,7 @@ import {
   totalPaidCentsByPartner,
   pendingCentsByPartner,
 } from '@/lib/payouts'
-import { totalEquityCentsByPartner, recordRentEquity } from '@/lib/equity'
+import { totalEquityCentsByPartner, recordRentEquity, repricePropertyEquity } from '@/lib/equity'
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
@@ -268,9 +268,18 @@ export async function updatePropertyAction(_prev: PropertyEditState, formData: F
 
   if (!ok) return { message: 'Property not found.', values }
 
+  // A changed equity share applies immediately to all accrued (unsent) equity,
+  // not just future payments — reprice this property's ledger entries.
+  if (equitySharePercent !== null) {
+    await repricePropertyEquity(id, equitySharePercent)
+  }
+
   revalidatePath('/admin/properties')
   revalidatePath(`/admin/properties/${id}`)
   revalidatePath('/properties')
+  revalidatePath('/partners/properties')
+  revalidatePath('/partners/payouts')
+  revalidatePath('/partners')
   return { ok: true, values }
 }
 

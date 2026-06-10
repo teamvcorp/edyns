@@ -14,18 +14,23 @@ const DEFAULT_EQUITY_SHARE_PERCENT = 10
 
 /**
  * Credit the partner's rent-equity ledger for a paid rent invoice: an admin-set
- * percentage of the rent (per property) becomes partner equity. Best-effort and
- * idempotent (keyed on the invoice id) — never blocks the webhook response.
+ * percentage of the base rent (per property) becomes partner equity. Best-effort
+ * and idempotent (keyed on the invoice id) — never blocks the webhook response.
  */
 async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionId: string): Promise<void> {
-  const rentCents = invoice.amount_paid
-  if (!invoice.id || !rentCents || rentCents <= 0) return
+  // Only credit when money actually moved.
+  if (!invoice.id || !invoice.amount_paid || invoice.amount_paid <= 0) return
 
   const tenant = await getTenantBySubscriptionId(subscriptionId)
   if (!tenant?.currentPropertyId) return
 
   const property = await getPropertyById(tenant.currentPropertyId)
   if (!property) return
+
+  // Equity accrues on the base rent the platform keeps — the Stripe processing-fee
+  // gross-up that the tenant covers stays with the platform. Fall back to the amount
+  // paid if no base is recorded (shouldn't happen for a subscription invoice).
+  const rentCents = tenant.billing?.baseAmountCents ?? invoice.amount_paid
 
   const sharePercent = property.equitySharePercent ?? DEFAULT_EQUITY_SHARE_PERCENT
   if (sharePercent <= 0) return
