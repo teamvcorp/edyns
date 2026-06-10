@@ -62,6 +62,16 @@ export default async function PartnerPayoutsPage({
   const ready = Boolean(account?.payouts_enabled)
   const frequency = partner?.payoutFrequency ?? 'manual'
 
+  const canRequestPayout = ready && availableCents > 0 && !hasPending
+  // Why the request button is disabled, in priority order (most actionable last).
+  const requestReason = hasPending
+    ? 'You have a payout request pending admin approval.'
+    : availableCents <= 0
+      ? 'No balance available yet — equity accrues as rent is collected on your rented properties.'
+      : !ready
+        ? 'Set up your payout account below before you can request a payout.'
+        : ''
+
   const bannerKey = sp.error ?? (sp.requested ? 'requested' : sp.freq ? 'freq' : sp.return ? 'return' : undefined)
   const bannerInfo = bannerKey ? banner[bannerKey] : undefined
 
@@ -113,21 +123,16 @@ export default async function PartnerPayoutsPage({
               </dd>
             </div>
           </dl>
-          {hasPending && (
+          <form action={requestPayout} className="w-fit">
+            <Button type="submit" size="lg" disabled={!canRequestPayout} className="disabled:opacity-60">
+              {availableCents > 0
+                ? `Request payout of ${formatCurrency(availableCents / 100)}`
+                : 'Request payout'}
+            </Button>
+          </form>
+          {requestReason && (
             <Text className="text-sm/6">
-              <p>You have a payout request pending admin approval.</p>
-            </Text>
-          )}
-          {ready && availableCents > 0 && !hasPending && (
-            <form action={requestPayout}>
-              <Button type="submit" size="lg">
-                Request payout of {formatCurrency(availableCents / 100)}
-              </Button>
-            </form>
-          )}
-          {!ready && availableCents > 0 && (
-            <Text className="text-sm/6">
-              <p>Set up your connected account below to request a payout.</p>
+              <p>{requestReason}</p>
             </Text>
           )}
           <p className="text-xs text-olive-600 dark:text-olive-500">

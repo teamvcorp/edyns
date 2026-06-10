@@ -103,6 +103,7 @@ export function EquityReportModal({
                   <thead>
                     <tr className="text-left text-olive-600 dark:text-olive-500">
                       <th className="py-2 font-medium">Date</th>
+                      <th className="py-2 font-medium">Method</th>
                       <th className="py-2 text-right font-medium">Rent</th>
                       <th className="py-2 text-right font-medium">Share</th>
                       <th className="py-2 text-right font-medium">Equity</th>
@@ -112,6 +113,7 @@ export function EquityReportModal({
                     {shown.map((e) => (
                       <tr key={e.id} className="text-olive-950 dark:text-white">
                         <td className="py-2">{new Date(e.paidAt).toLocaleDateString()}</td>
+                        <td className="py-2 capitalize">{e.source}</td>
                         <td className="py-2 text-right">{formatCurrency(e.rentCents / 100)}</td>
                         <td className="py-2 text-right">{e.sharePercent}%</td>
                         <td className="py-2 text-right">{formatCurrency(e.equityCents / 100)}</td>

@@ -1,7 +1,11 @@
 import 'server-only'
 
 import { ObjectId, type Collection } from 'mongodb'
+import { randomUUID } from 'node:crypto'
 import { getDb } from './mongodb'
+
+/** How a rent payment reached us: an automatic Stripe charge or recorded cash. */
+export type EquitySource = 'stripe' | 'cash'
 
 /**
  * Rent-accrued equity ledger. One row per successful rent payment: an admin-set,
@@ -13,9 +17,15 @@ export interface RentEquityDoc {
   partnerId: ObjectId
   propertyId: ObjectId
   tenantId: ObjectId
-  /** Stripe invoice id — unique, so repeated webhook delivery can't double-credit. */
+  /**
+   * Unique payment reference — the Stripe invoice id for auto charges, or a
+   * generated `cash_…` ref for manually-recorded cash. Unique, so repeated
+   * webhook delivery (or a double form submit) can't double-credit.
+   */
   stripeInvoiceId: string
-  /** Rent actually charged on the invoice, in cents (the share basis). */
+  /** Whether this came from Stripe or was recorded as a cash payment. */
+  source: EquitySource
+  /** Rent actually charged/received, in cents (the share basis). */
   rentCents: number
   /** Percentage of rent credited to the partner. */
   sharePercent: number
@@ -27,6 +37,7 @@ export interface RentEquityDoc {
 export type RentEquityEntry = {
   id: string
   propertyId: string
+  source: EquitySource
   rentCents: number
   sharePercent: number
   equityCents: number
@@ -46,6 +57,7 @@ function toEntry(d: RentEquityDoc): RentEquityEntry {
   return {
     id: d._id.toString(),
     propertyId: d.propertyId.toString(),
+    source: d.source ?? 'stripe',
     rentCents: d.rentCents,
     sharePercent: d.sharePercent,
     equityCents: d.equityCents,
@@ -61,7 +73,9 @@ export async function recordRentEquity(input: {
   partnerId: string
   propertyId: string
   tenantId: string
-  stripeInvoiceId: string
+  /** Stripe invoice id for auto charges; omit for cash (a `cash_…` ref is generated). */
+  stripeInvoiceId?: string
+  source?: EquitySource
   rentCents: number
   sharePercent: number
   equityCents: number
@@ -70,6 +84,8 @@ export async function recordRentEquity(input: {
   if (!ObjectId.isValid(input.partnerId) || !ObjectId.isValid(input.propertyId) || !ObjectId.isValid(input.tenantId)) {
     return
   }
+  const source = input.source ?? 'stripe'
+  const ref = input.stripeInvoiceId ?? `cash_${randomUUID()}`
   const col = await equityCollection()
   try {
     await col.insertOne({
@@ -77,7 +93,8 @@ export async function recordRentEquity(input: {
       partnerId: new ObjectId(input.partnerId),
       propertyId: new ObjectId(input.propertyId),
       tenantId: new ObjectId(input.tenantId),
-      stripeInvoiceId: input.stripeInvoiceId,
+      stripeInvoiceId: ref,
+      source,
       rentCents: input.rentCents,
       sharePercent: input.sharePercent,
       equityCents: input.equityCents,

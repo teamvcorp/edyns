@@ -19,6 +19,7 @@ import {
   unplaceTenant,
   getTenantById,
   getTenantBySubscriptionId,
+  findTenantByProperty,
   attachStripeCustomer,
   setBilling,
   clearBilling,
@@ -36,7 +37,7 @@ import {
   totalPaidCentsByPartner,
   pendingCentsByPartner,
 } from '@/lib/payouts'
-import { totalEquityCentsByPartner } from '@/lib/equity'
+import { totalEquityCentsByPartner, recordRentEquity } from '@/lib/equity'
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
@@ -279,6 +280,51 @@ export async function adminDeletePropertyAction(formData: FormData): Promise<voi
   await adminDeleteProperty(id)
   revalidatePath('/admin/properties')
   redirect('/admin/properties')
+}
+
+/**
+ * Record a cash rent payment on a property (e.g. the tenant paid in office because
+ * their auto-draft failed). It accrues partner equity exactly like an automatic
+ * payment — the property's share % of the amount — tagged as a cash payment.
+ */
+export async function addCashRentPaymentAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const propertyId = String(formData.get('propertyId') ?? '').trim()
+  const amount = Number(String(formData.get('amount') ?? '').trim())
+  const dateStr = String(formData.get('paidAt') ?? '').trim()
+  const back = `/admin/properties/${propertyId}`
+
+  const property = await getPropertyById(propertyId)
+  if (!property || property.status !== 'approved') redirect(`${back}?cash=error`)
+  if (!Number.isFinite(amount) || amount <= 0) redirect(`${back}?cash=amount`)
+
+  // Equity is credited against the tenant currently placed at the property.
+  const tenant = await findTenantByProperty(propertyId)
+  if (!tenant) redirect(`${back}?cash=no-tenant`)
+
+  const paidAt = dateStr ? new Date(`${dateStr}T12:00:00`) : new Date()
+  if (Number.isNaN(paidAt.getTime())) redirect(`${back}?cash=date`)
+
+  const rentCents = Math.round(amount * 100)
+  const sharePercent = property.equitySharePercent ?? 10
+  const equityCents = Math.round((rentCents * sharePercent) / 100)
+
+  await recordRentEquity({
+    partnerId: property.partnerId,
+    propertyId,
+    tenantId: tenant.id,
+    source: 'cash',
+    rentCents,
+    sharePercent,
+    equityCents,
+    paidAt,
+  })
+
+  revalidatePath(back)
+  revalidatePath('/partners/properties')
+  revalidatePath('/partners/payouts')
+  revalidatePath('/partners')
+  redirect(`${back}?cash=recorded`)
 }
 
 // ---- Tenant application review ----

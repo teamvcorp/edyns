@@ -122,7 +122,7 @@ export async function sendEquityReportEmail(input: {
   to: string
   name: string
   propertyLabel: string
-  entries: { rentCents: number; sharePercent: number; equityCents: number; paidAt: Date }[]
+  entries: { source: string; rentCents: number; sharePercent: number; equityCents: number; paidAt: Date }[]
   ytdCents: number
   lifetimeCents: number
 }): Promise<void> {
@@ -130,12 +130,13 @@ export async function sendEquityReportEmail(input: {
   const year = new Date().getFullYear()
   const rows =
     input.entries.length === 0
-      ? `<tr><td colspan="4" style="padding:8px;color:#6b6b60">No rent equity recorded yet.</td></tr>`
+      ? `<tr><td colspan="5" style="padding:8px;color:#6b6b60">No rent equity recorded yet.</td></tr>`
       : input.entries
           .map(
             (e) => `
         <tr>
           <td style="padding:6px 8px;border-top:1px solid #e5e5dd">${new Date(e.paidAt).toLocaleDateString()}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-transform:capitalize">${escapeHtml(e.source)}</td>
           <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${usd(e.rentCents)}</td>
           <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${e.sharePercent}%</td>
           <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${usd(e.equityCents)}</td>
@@ -155,6 +156,7 @@ export async function sendEquityReportEmail(input: {
         <thead>
           <tr style="text-align:left;color:#6b6b60">
             <th style="padding:6px 8px">Date</th>
+            <th style="padding:6px 8px">Method</th>
             <th style="padding:6px 8px;text-align:right">Rent</th>
             <th style="padding:6px 8px;text-align:right">Share</th>
             <th style="padding:6px 8px;text-align:right">Equity</th>
