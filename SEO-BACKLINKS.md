@@ -20,11 +20,12 @@ descriptive links across the network raise the whole ecosystem's search authorit
 | ---------------- | ---------------------------- | ----------------- |
 | Edynsgate        | https://edynsgate.com        | Housing           |
 | Homeschool+      | https://homeschool-plus.com  | Education         |
-| RallyUp          | https://rallyup.us           | Healthcare        |
+| RallyUp          | https://rallyup.us           | Healthcare & debt relief |
 | The Good Deed    | https://thegooddeed.net      | Youth Leadership  |
 | Spirit of Santa  | https://spiritofsanta.com    | Positive Behavior |
+| Black Belt Parenting | https://www.fyht4.com    | Parenting         |
 
-> When editing one program site, link to **VA Corp** + the **other four** programs
+> When editing one program site, link to **VA Corp** + the **other** programs
 > (not itself).
 
 ---
@@ -57,9 +58,10 @@ Next.js / React version:
   <a href="https://www.thevacorp.com">VA Corp</a>
   <a href="https://edynsgate.com">Edynsgate — Housing</a>
   <a href="https://homeschool-plus.com">Homeschool+ — Education</a>
-  <a href="https://rallyup.us">RallyUp — Healthcare</a>
+  <a href="https://rallyup.us">RallyUp — Healthcare & debt relief</a>
   <a href="https://thegooddeed.net">The Good Deed — Youth Leadership</a>
   <a href="https://spiritofsanta.com">Spirit of Santa — Positive Behavior</a>
+  <a href="https://www.fyht4.com">Black Belt Parenting — Parenting</a>
 </nav>
 ```
 
@@ -86,7 +88,8 @@ stay the same everywhere so search engines see one connected network.
     "https://homeschool-plus.com",
     "https://rallyup.us",
     "https://thegooddeed.net",
-    "https://spiritofsanta.com"
+    "https://spiritofsanta.com",
+    "https://www.fyht4.com"
   ]
 }
 </script>
@@ -111,6 +114,7 @@ const orgJsonLd = {
     "https://rallyup.us",
     "https://thegooddeed.net",
     "https://spiritofsanta.com",
+    "https://www.fyht4.com",
   ].filter((u) => u !== "https://edynsgate.com"), // drop self
 };
 
