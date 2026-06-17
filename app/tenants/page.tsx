@@ -62,13 +62,18 @@ export default async function TenantPortalPage({
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
   const verifiedHours = tenant.employment.verifiedWeeklyHours
   const billing = tenant.billing
+  // A bank/payroll connection exists but income isn't confirmed yet — Plaid's
+  // payroll/bank-income reads are often asynchronous and finish via the webhook.
+  const plaidPending = Boolean(tenant.plaidItemId) && !tenant.employment.verified
   const incomeStatus = tenant.employment.verified
     ? 'Verified'
-    : tenant.paystub
-      ? 'Paystub uploaded'
-      : tenant.status === 'approved'
-        ? 'Action needed'
-        : 'After approval'
+    : plaidPending
+      ? 'Confirming'
+      : tenant.paystub
+        ? 'Paystub uploaded'
+        : tenant.status === 'approved'
+          ? 'Action needed'
+          : 'After approval'
 
   // Move-in requests, joined with property address for display.
   const requests = await listRequestsByTenant(tenant.id)
@@ -174,17 +179,27 @@ export default async function TenantPortalPage({
           </>
         ) : (
           <>
-            <Text className="text-sm/6">
-              <p>
-                One last step before rent setup: <strong>connect your bank</strong> so we can confirm your income
-                deposits — this is required. You cover any Plaid/Stripe fees.
-              </p>
-            </Text>
+            {plaidPending ? (
+              <Text className="text-sm/6">
+                <p>
+                  We connected your account and are <strong>confirming your income</strong> — this can take a few
+                  minutes, and we’ll email you when it’s done. If it doesn’t go through, you can verify with bank
+                  deposits or upload a paystub below.
+                </p>
+              </Text>
+            ) : (
+              <Text className="text-sm/6">
+                <p>
+                  One last step before rent setup: <strong>connect your bank</strong> so we can confirm your income
+                  deposits — this is required. You cover any Plaid/Stripe fees.
+                </p>
+              </Text>
+            )}
             <SelfEmployedToggle
               selfEmployed={Boolean(tenant.employment.selfEmployed)}
               hourlyRate={tenant.employment.claimedHourlyRate}
             />
-            <PlaidVerifyButton />
+            <PlaidVerifyButton selfEmployed={Boolean(tenant.employment.selfEmployed)} />
             <div className="mt-2 flex flex-col gap-2 border-t border-olive-950/10 pt-3 dark:border-white/10">
               <span className="text-xs text-olive-600 dark:text-olive-500">
                 Trouble connecting your bank, or we couldn’t confirm your hours? Upload your most recent paystub (PDF or

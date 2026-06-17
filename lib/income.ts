@@ -20,10 +20,24 @@ export interface IncomeReading {
   hasRecentIncome: boolean
 }
 
+/** Bank deposits as an income reading (no pay date or actual hours available). */
+function bankReading(monthlyIncome: number | null, weeklyHours: number | null): IncomeReading {
+  return {
+    monthlyIncome,
+    weeklyHours,
+    lastPayDate: null,
+    hasRecentIncome: monthlyIncome != null && monthlyIncome > 0,
+  }
+}
+
 /**
  * Read a tenant's income from Plaid using the right method for their employment
  * type: Payroll (gross + actual hours + pay date) for employees, Bank deposits
  * for the self-employed (with hours implied from their claimed hourly rate).
+ *
+ * Employees whose payroll provider isn't supported by Plaid can verify via the
+ * Bank-deposit fallback instead; when no payroll data is present we read Bank
+ * deposits (hours unknown — confirmed later from a paystub on review).
  */
 export async function readIncome(opts: {
   userToken: string
@@ -33,15 +47,17 @@ export async function readIncome(opts: {
   if (opts.selfEmployed) {
     // Self-employed: bank deposits are the income; hours are implied from the claimed rate.
     const monthlyIncome = await getMonthlyIncome(opts.userToken)
-    return {
-      monthlyIncome,
-      weeklyHours: impliedWeeklyHours(monthlyIncome, opts.claimedHourlyRate),
-      lastPayDate: null,
-      hasRecentIncome: monthlyIncome != null && monthlyIncome > 0,
-    }
+    return bankReading(monthlyIncome, impliedWeeklyHours(monthlyIncome, opts.claimedHourlyRate))
   }
 
   const payroll = await getPayrollIncome(opts.userToken)
+  if (payroll.monthlyIncome == null) {
+    // Payroll yielded nothing (unsupported provider or not yet ready) — fall back
+    // to any Bank deposits the employee linked. Hours stay null for human review.
+    const bankIncome = await getMonthlyIncome(opts.userToken)
+    if (bankIncome != null) return bankReading(bankIncome, null)
+  }
+
   const recentByDate =
     payroll.lastPayDate != null && Date.now() - new Date(payroll.lastPayDate).getTime() < RECENT_INCOME_WINDOW_MS
   // If we have income but no date (some providers omit it), treat as present.

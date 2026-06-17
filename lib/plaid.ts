@@ -43,14 +43,17 @@ export async function createUserToken(clientUserId: string): Promise<{ userToken
   return { userToken: res.data.user_token, userId: res.data.user_id }
 }
 
+/** Which income source a Link token collects. Plaid allows exactly ONE per token. */
+export type IncomeSource = 'payroll' | 'bank'
+
 /** Link token for income verification. Plaid allows exactly ONE income source
- *  type per Link token, so we request the single source the read path actually
- *  consumes: Bank deposits for the self-employed, Payroll (gross + hours) for
- *  employees. (See readIncome in lib/income.ts.) */
+ *  type per Link token: `payroll` (gross + hours) for employees, `bank` (deposits)
+ *  for the self-employed — and as an employee fallback when their payroll provider
+ *  isn't supported by Plaid. (See readIncome in lib/income.ts.) */
 export async function createIncomeLinkToken(
   userToken: string,
   clientUserId: string,
-  selfEmployed = false,
+  source: IncomeSource = 'payroll',
 ): Promise<string> {
   // Required for OAuth banks: must exactly match an Allowed redirect URI in the
   // Plaid Dashboard. Omitted locally (Plaid rejects http/localhost) so the
@@ -68,12 +71,11 @@ export async function createIncomeLinkToken(
     ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     ...(webhook?.startsWith('https://') ? { webhook } : {}),
     income_verification: {
-      // Exactly one source type (Plaid rejects more): Bank for self-employed,
-      // Payroll for employees. bank_income only applies to the Bank source.
-      income_source_types: selfEmployed
-        ? [IncomeVerificationSourceType.Bank]
-        : [IncomeVerificationSourceType.Payroll],
-      ...(selfEmployed ? { bank_income: { days_requested: 90 } } : {}),
+      // Exactly one source type (Plaid rejects more). bank_income only applies
+      // to the Bank source.
+      income_source_types:
+        source === 'bank' ? [IncomeVerificationSourceType.Bank] : [IncomeVerificationSourceType.Payroll],
+      ...(source === 'bank' ? { bank_income: { days_requested: 90 } } : {}),
     },
   })
   return res.data.link_token

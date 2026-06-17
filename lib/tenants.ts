@@ -264,17 +264,24 @@ export async function savePlaidVerification(
   },
 ): Promise<void> {
   const col = await tenantsCollection()
+  // Always persist the connection (the access token/item lets the webhook + cron
+  // read income later, including async payroll/bank-income that isn't ready yet).
   const set: Record<string, unknown> = {
     plaidAccessTokenEnc: input.accessTokenEnc,
     plaidItemId: input.itemId,
-    'employment.verified': true,
     'employment.verificationMethod': 'plaid',
-    'employment.verifiedAt': new Date(),
     updatedAt: new Date(),
   }
-  if (input.verifiedMonthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
-  if (input.verifiedWeeklyHours != null) set['employment.verifiedWeeklyHours'] = input.verifiedWeeklyHours
-  if (input.lastPayDate) set['employment.lastPayDate'] = input.lastPayDate
+  // "Verified" means income was actually found — a bank/payroll connection that
+  // returns nothing stays unverified (income may still arrive via webhook, or the
+  // tenant uses the bank fallback / paystub). See setVerifiedIncome for the async path.
+  if (input.verifiedMonthlyIncome !== null) {
+    set['employment.verified'] = true
+    set['employment.verifiedAt'] = new Date()
+    set['employment.verifiedMonthlyIncome'] = input.verifiedMonthlyIncome
+    if (input.verifiedWeeklyHours != null) set['employment.verifiedWeeklyHours'] = input.verifiedWeeklyHours
+    if (input.lastPayDate) set['employment.lastPayDate'] = input.lastPayDate
+  }
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
 }
 
@@ -358,20 +365,25 @@ export async function getTenantByPlaidUserId(plaidUserId: string): Promise<Tenan
   return doc ? toTenant(doc) : null
 }
 
-/** Mark income verified + refresh the verified figures for a tenant (by application id). */
+/**
+ * Mark income verified + refresh the verified figures for a tenant (by application id).
+ * No-op when no income was found: "verified" must mean we actually have income on
+ * file. Callers handle the empty case (flag for review + alert) — we never mark
+ * verified, nor downgrade an existing verification, on a null reading.
+ */
 export async function setVerifiedIncome(
   tenantId: string,
   input: { monthlyIncome: number | null; weeklyHours?: number | null; lastPayDate?: string | null },
 ): Promise<void> {
-  if (!ObjectId.isValid(tenantId)) return
+  if (!ObjectId.isValid(tenantId) || input.monthlyIncome === null) return
   const col = await tenantsCollection()
   const set: Record<string, unknown> = {
     'employment.verified': true,
     'employment.verificationMethod': 'plaid',
     'employment.verifiedAt': new Date(),
+    'employment.verifiedMonthlyIncome': input.monthlyIncome,
     updatedAt: new Date(),
   }
-  if (input.monthlyIncome !== null) set['employment.verifiedMonthlyIncome'] = input.monthlyIncome
   if (input.weeklyHours != null) set['employment.verifiedWeeklyHours'] = input.weeklyHours
   if (input.lastPayDate) set['employment.lastPayDate'] = input.lastPayDate
   await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: set })

@@ -4,10 +4,15 @@ import { getTenantByUserId, setPlaidUserToken } from '@/lib/tenants'
 import { createUserToken, createIncomeLinkToken } from '@/lib/plaid'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 
-/** Issues a Plaid Link token for the signed-in tenant's income verification. */
-export async function POST(): Promise<NextResponse> {
+/** Issues a Plaid Link token for the signed-in tenant's income verification.
+ *  Body may request `{ source: 'bank' }` so an employee whose payroll provider
+ *  isn't supported by Plaid can fall back to verifying via bank deposits. */
+export async function POST(req: Request): Promise<NextResponse> {
   const session = await getSession()
   if (session?.role !== 'tenant') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const body = await req.json().catch(() => null)
+  const requestedBank = body?.source === 'bank'
 
   // Throttle link-token issuance per tenant and per IP to curb link abuse / Plaid spend.
   const ip = await getClientIp()
@@ -36,7 +41,10 @@ export async function POST(): Promise<NextResponse> {
       userToken = created.userToken
       await setPlaidUserToken(session.sub, created.userToken, created.userId)
     }
-    const linkToken = await createIncomeLinkToken(userToken, session.sub, Boolean(tenant.employment.selfEmployed))
+    // Self-employed always verify via bank; employees use payroll unless they
+    // explicitly fall back to bank deposits.
+    const source = tenant.employment.selfEmployed || requestedBank ? 'bank' : 'payroll'
+    const linkToken = await createIncomeLinkToken(userToken, session.sub, source)
     return NextResponse.json({ link_token: linkToken })
   } catch {
     return NextResponse.json({ error: unavailable, fallback: 'paystub' }, { status: 503 })
