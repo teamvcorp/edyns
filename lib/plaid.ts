@@ -43,8 +43,10 @@ export async function createUserToken(clientUserId: string): Promise<{ userToken
   return { userToken: res.data.user_token, userId: res.data.user_id }
 }
 
-/** Link token for income verification. Self-employed tenants verify via Bank
- *  deposits only; employees get Payroll (for hours) with Bank as a fallback. */
+/** Link token for income verification. Plaid allows exactly ONE income source
+ *  type per Link token, so we request the single source the read path actually
+ *  consumes: Bank deposits for the self-employed, Payroll (gross + hours) for
+ *  employees. (See readIncome in lib/income.ts.) */
 export async function createIncomeLinkToken(
   userToken: string,
   clientUserId: string,
@@ -66,11 +68,12 @@ export async function createIncomeLinkToken(
     ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     ...(webhook?.startsWith('https://') ? { webhook } : {}),
     income_verification: {
-      // Self-employed: deposits only. Employees: Payroll (hours) + Bank fallback.
+      // Exactly one source type (Plaid rejects more): Bank for self-employed,
+      // Payroll for employees. bank_income only applies to the Bank source.
       income_source_types: selfEmployed
         ? [IncomeVerificationSourceType.Bank]
-        : [IncomeVerificationSourceType.Payroll, IncomeVerificationSourceType.Bank],
-      bank_income: { days_requested: 90 },
+        : [IncomeVerificationSourceType.Payroll],
+      ...(selfEmployed ? { bank_income: { days_requested: 90 } } : {}),
     },
   })
   return res.data.link_token
