@@ -49,7 +49,7 @@ const orgJsonLd = {
     'https://rallyup.us',
     'https://thegooddeed.net',
     'https://spiritofsanta.com',
-    'https://www.fyht4.com',
+    'https://app.fyht4.com',
   ],
 }
 

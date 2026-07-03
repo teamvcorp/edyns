@@ -31,7 +31,7 @@ const groups: FooterGroup[] = [
       { href: 'https://rallyup.us', label: 'RallyUp — Healthcare & debt relief', external: true },
       { href: 'https://thegooddeed.net', label: 'The Good Deed — Youth Leadership', external: true },
       { href: 'https://spiritofsanta.com', label: 'Spirit of Santa — Positive Behavior', external: true },
-      { href: 'https://www.fyht4.com', label: 'Black Belt Parenting — Parenting', external: true },
+      { href: 'https://app.fyht4.com', label: 'Black Belt Parenting — Parenting', external: true },
     ],
   },
 ]
