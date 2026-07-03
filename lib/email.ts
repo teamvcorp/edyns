@@ -2,10 +2,15 @@ import 'server-only'
 
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
 
-/** Send an email via the Resend REST API (no SDK dependency). */
-export async function sendEmail(input: { to: string; subject: string; html: string }): Promise<void> {
+/**
+ * Send an email via the Resend REST API (no SDK dependency).
+ * `from` defaults to FROM_EMAIL but callers may override it (e.g. billing mail
+ * goes out from a dedicated address). Any override domain must be verified in
+ * the Resend account or the send is rejected.
+ */
+export async function sendEmail(input: { to: string; subject: string; html: string; from?: string }): Promise<void> {
   const key = process.env.RESEND_API_KEY
-  const from = process.env.FROM_EMAIL
+  const from = input.from ?? process.env.FROM_EMAIL
   if (!key || !from) throw new Error('Email is not configured (RESEND_API_KEY / FROM_EMAIL)')
 
   const res = await fetch('https://api.resend.com/emails', {
@@ -183,6 +188,13 @@ const INVOICE_TERMS_HTML = `
     A card/bank processing fee is added at checkout.
   </p>`
 
+/**
+ * Project invoices are sent from a dedicated billing address (default
+ * billing@fyht4.com). Override with INVOICE_FROM_EMAIL. The domain must be a
+ * verified sending domain in Resend.
+ */
+const INVOICE_FROM_EMAIL = process.env.INVOICE_FROM_EMAIL ?? 'edynsgate Billing <billing@fyht4.com>'
+
 const invoiceUsd = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
 /** Renders the line-item table with a project-total footer. */
@@ -266,7 +278,7 @@ export async function sendProjectInvoiceEmail(inv: InvoiceEmail): Promise<void> 
       ${INVOICE_TERMS_HTML}
       <p style="color:#6b6b60;font-size:13px">If accepted, a 50% deposit (or payment in full) is required before work begins.</p>
     </div>`
-  await sendEmail({ to: inv.recipient.email, subject: `Project proposal — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Project proposal — ${inv.title}`, html })
 }
 
 /** Final invoice email after acceptance: summary + prominent pay link. */
@@ -284,7 +296,7 @@ export async function sendFinalInvoiceEmail(inv: InvoiceEmail): Promise<void> {
       ${invoiceButton(url, 'Review & pay')}
       ${INVOICE_TERMS_HTML}
     </div>`
-  await sendEmail({ to: inv.recipient.email, subject: `Invoice ready to pay — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Invoice ready to pay — ${inv.title}`, html })
 }
 
 /** Completion email: finished-work photo + any remaining balance to pay. */
@@ -304,7 +316,7 @@ export async function sendBalanceDueEmail(inv: InvoiceEmail): Promise<void> {
       }
       ${INVOICE_TERMS_HTML}
     </div>`
-  await sendEmail({ to: inv.recipient.email, subject: `Work completed — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Work completed — ${inv.title}`, html })
 }
 
 function escapeHtml(s: string): string {
