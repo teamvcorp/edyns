@@ -4,6 +4,7 @@ import { listAllProperties } from '@/lib/properties'
 import { listTenants } from '@/lib/tenants'
 import { listAllRequests } from '@/lib/moveins'
 import { listAllPayoutRequests } from '@/lib/payouts'
+import { listAllInvoices } from '@/lib/invoices'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -15,16 +16,18 @@ const comingSoon = [{ title: 'Settings', body: 'Configure platform-wide settings
 
 export default async function AdminPage() {
   await requireRole('admin', '/admin/login')
-  const [properties, tenants, requests, payouts] = await Promise.all([
+  const [properties, tenants, requests, payouts, invoices] = await Promise.all([
     listAllProperties(),
     listTenants(),
     listAllRequests(),
     listAllPayoutRequests(),
+    listAllInvoices(),
   ])
   const pending = properties.filter((p) => p.status === 'pending').length
   const pendingTenants = tenants.filter((t) => t.status === 'pending').length
   const pendingMoveIns = requests.filter((r) => r.status === 'requested').length
   const pendingPayouts = payouts.filter((p) => p.status === 'requested').length
+  const openInvoices = invoices.filter((i) => i.status === 'sent' || i.status === 'accepted').length
 
   return (
     <PortalShell eyebrow="Administration" title="Admin dashboard">
@@ -93,6 +96,20 @@ export default async function AdminPage() {
             </Text>
           </div>
           <ButtonLink href="/admin/partners">Manage partners</ButtonLink>
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Project invoices</h3>
+            <Text className="text-sm/6">
+              <p>
+                {openInvoices} open invoice{openInvoices === 1 ? '' : 's'} awaiting response or completion.
+              </p>
+            </Text>
+          </div>
+          <ButtonLink href="/admin/invoices">Manage invoices</ButtonLink>
         </div>
       </Card>
 

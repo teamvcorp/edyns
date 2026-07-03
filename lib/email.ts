@@ -170,6 +170,143 @@ export async function sendEquityReportEmail(input: {
   await sendEmail({ to: input.to, subject: `Equity report — ${input.propertyLabel}`, html })
 }
 
+// ---- Project invoices ----
+
+/**
+ * Fair-billing terms shown on every project invoice email and the public invoice
+ * page. Kept identical everywhere so the partner sees consistent language.
+ */
+const INVOICE_TERMS_HTML = `
+  <p style="background:#f3f3ee;border-radius:8px;padding:12px 16px;font-size:13px;color:#4b4b40;line-height:1.6">
+    <strong>Billing terms.</strong> No work begins without payment, and no new project may start until any
+    outstanding balance is paid. Non-skilled labor and included materials are billed at 90% of cost.
+    A card/bank processing fee is added at checkout.
+  </p>`
+
+const invoiceUsd = (cents: number) => `$${(cents / 100).toFixed(2)}`
+
+/** Renders the line-item table with a project-total footer. */
+function invoiceLineItemsHtml(inv: InvoiceEmail): string {
+  const rows =
+    inv.lineItems.length === 0
+      ? `<tr><td colspan="4" style="padding:8px;color:#6b6b60">No line items.</td></tr>`
+      : inv.lineItems
+          .map(
+            (li) => `
+        <tr>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd">${escapeHtml(li.label)}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${li.quantity}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${invoiceUsd(li.unitCents)}</td>
+          <td style="padding:6px 8px;border-top:1px solid #e5e5dd;text-align:right">${invoiceUsd(li.quantity * li.unitCents)}</td>
+        </tr>`,
+          )
+          .join('')
+  return `
+    <table style="border-collapse:collapse;width:100%;font-size:14px;margin:12px 0">
+      <thead>
+        <tr style="text-align:left;color:#6b6b60">
+          <th style="padding:6px 8px">Item</th>
+          <th style="padding:6px 8px;text-align:right">Qty</th>
+          <th style="padding:6px 8px;text-align:right">Unit</th>
+          <th style="padding:6px 8px;text-align:right">Amount</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3" style="padding:8px;text-align:right;font-weight:600;border-top:2px solid #26301b">Project total</td>
+          <td style="padding:8px;text-align:right;font-weight:600;border-top:2px solid #26301b">${invoiceUsd(inv.subtotalCents)}</td>
+        </tr>
+      </tfoot>
+    </table>`
+}
+
+/** A horizontal strip of hosted photos (Vercel Blob URLs). */
+function invoicePhotoStripHtml(urls: string[]): string {
+  if (!urls || urls.length === 0) return ''
+  const imgs = urls
+    .map(
+      (u) =>
+        `<img src="${encodeURI(u)}" alt="" width="150" style="border-radius:8px;margin:0 8px 8px 0;vertical-align:top" />`,
+    )
+    .join('')
+  return `<div style="margin:12px 0">${imgs}</div>`
+}
+
+function invoiceButton(url: string, label: string): string {
+  return `<p><a href="${url}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:12px 22px;text-decoration:none;font-weight:600">${label}</a></p>`
+}
+
+/** Minimal shape the invoice emails need — a subset of `Invoice` from lib/invoices. */
+export type InvoiceEmail = {
+  token: string
+  title: string
+  description: string
+  timeline: string
+  lineItems: { label: string; quantity: number; unitCents: number }[]
+  subtotalCents: number
+  proposedPhotoUrls: string[]
+  finishedPhotoUrl?: string
+  payment: { depositCents: number; balanceCents: number; paidCents: number }
+  recipient: { name: string; email: string }
+}
+
+/** Proposal email: scope, timeline, cost, proposed-work photos, respond link. */
+export async function sendProjectInvoiceEmail(inv: InvoiceEmail): Promise<void> {
+  const url = `${baseUrl}/invoices/${inv.token}`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Project proposal — ${escapeHtml(inv.title)}</h2>
+      <p>Hi ${escapeHtml(inv.recipient.name)}, here’s a proposal for your review.</p>
+      <p style="white-space:pre-wrap">${escapeHtml(inv.description)}</p>
+      <p style="background:#f3f3ee;border-radius:8px;padding:12px 16px"><strong>Timeline:</strong> ${escapeHtml(inv.timeline)}</p>
+      ${invoicePhotoStripHtml(inv.proposedPhotoUrls)}
+      ${invoiceLineItemsHtml(inv)}
+      ${invoiceButton(url, 'Review, accept or decline')}
+      ${INVOICE_TERMS_HTML}
+      <p style="color:#6b6b60;font-size:13px">If accepted, a 50% deposit (or payment in full) is required before work begins.</p>
+    </div>`
+  await sendEmail({ to: inv.recipient.email, subject: `Project proposal — ${inv.title}`, html })
+}
+
+/** Final invoice email after acceptance: summary + prominent pay link. */
+export async function sendFinalInvoiceEmail(inv: InvoiceEmail): Promise<void> {
+  const url = `${baseUrl}/invoices/${inv.token}`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Invoice ready — ${escapeHtml(inv.title)}</h2>
+      <p>Thanks for accepting, ${escapeHtml(inv.recipient.name)}. Here’s your invoice.</p>
+      ${invoiceLineItemsHtml(inv)}
+      <p style="background:#f3f3ee;border-radius:8px;padding:12px 16px">
+        <strong>Pay in full:</strong> ${invoiceUsd(inv.subtotalCents)}<br/>
+        <strong>Or 50% deposit now:</strong> ${invoiceUsd(inv.payment.depositCents)} (balance ${invoiceUsd(inv.payment.balanceCents)} due on completion)
+      </p>
+      ${invoiceButton(url, 'Review & pay')}
+      ${INVOICE_TERMS_HTML}
+    </div>`
+  await sendEmail({ to: inv.recipient.email, subject: `Invoice ready to pay — ${inv.title}`, html })
+}
+
+/** Completion email: finished-work photo + any remaining balance to pay. */
+export async function sendBalanceDueEmail(inv: InvoiceEmail): Promise<void> {
+  const url = `${baseUrl}/invoices/${inv.token}`
+  const balanceCents = Math.max(0, inv.subtotalCents - inv.payment.paidCents)
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Work completed — ${escapeHtml(inv.title)}</h2>
+      <p>Hi ${escapeHtml(inv.recipient.name)}, the work is complete. Here’s a photo for your records:</p>
+      ${invoicePhotoStripHtml(inv.finishedPhotoUrl ? [inv.finishedPhotoUrl] : [])}
+      ${
+        balanceCents > 0
+          ? `<p style="background:#f3f3ee;border-radius:8px;padding:12px 16px"><strong>Balance due:</strong> ${invoiceUsd(balanceCents)}</p>
+             ${invoiceButton(url, 'Pay balance')}`
+          : `<p><strong>This project is paid in full — thank you!</strong></p>`
+      }
+      ${INVOICE_TERMS_HTML}
+    </div>`
+  await sendEmail({ to: inv.recipient.email, subject: `Work completed — ${inv.title}`, html })
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))
 }

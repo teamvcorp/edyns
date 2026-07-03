@@ -9,11 +9,17 @@ export function ImageUploader({
   multiple = false,
   value,
   onChange,
+  pathPrefix = 'properties',
+  uploadUrl = '/api/partners/upload',
 }: {
   label: string
   multiple?: boolean
   value: string[]
   onChange: (urls: string[]) => void
+  /** Blob path prefix, e.g. 'properties' or 'invoices'. */
+  pathPrefix?: string
+  /** Route that issues the client upload token (must allow the caller's role). */
+  uploadUrl?: string
 }) {
   const inputId = useId()
   const [uploading, setUploading] = useState(false)
@@ -26,9 +32,9 @@ export function ImageUploader({
     try {
       const uploaded: string[] = []
       for (const file of Array.from(files)) {
-        const blob = await upload(`properties/${file.name}`, file, {
+        const blob = await upload(`${pathPrefix}/${file.name}`, file, {
           access: 'public',
-          handleUploadUrl: '/api/partners/upload',
+          handleUploadUrl: uploadUrl,
         })
         uploaded.push(blob.url)
       }

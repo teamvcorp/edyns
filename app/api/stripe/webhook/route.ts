@@ -8,6 +8,7 @@ import {
 } from '@/lib/tenants'
 import { getPropertyById } from '@/lib/properties'
 import { recordRentEquity } from '@/lib/equity'
+import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
 
 /** Default partner equity share when a property hasn't set one. */
 const DEFAULT_EQUITY_SHARE_PERCENT = 10
@@ -97,12 +98,20 @@ export async function POST(request: Request): Promise<Response> {
     const session = event.data.object as Stripe.Checkout.Session
     const paid = session.payment_status === 'paid'
     const failed = event.type === 'checkout.session.async_payment_failed'
-    const pi = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
 
-    await applyFeeResult(session.id, {
-      status: failed ? 'unpaid' : paid ? 'paid' : 'processing',
-      paymentIntentId: pi ?? undefined,
-    })
+    // Sessions carry a `type` in metadata so we can route them. Project-invoice
+    // payments update the invoice; everything else is a tenant application fee.
+    if (session.metadata?.type === 'project_invoice') {
+      const invoiceId = session.metadata.invoiceId
+      const phase = session.metadata.phase as PaymentPhase | undefined
+      if (invoiceId && phase) await recordInvoicePayment(invoiceId, session.id, phase, paid && !failed)
+    } else {
+      const pi = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
+      await applyFeeResult(session.id, {
+        status: failed ? 'unpaid' : paid ? 'paid' : 'processing',
+        paymentIntentId: pi ?? undefined,
+      })
+    }
   } else if (event.type === 'customer.subscription.updated') {
     const sub = event.data.object as Stripe.Subscription
     const status = mapSubscriptionStatus(sub.status)
