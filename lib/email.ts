@@ -6,9 +6,17 @@ const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
  * Send an email via the Resend REST API (no SDK dependency).
  * `from` defaults to FROM_EMAIL but callers may override it (e.g. billing mail
  * goes out from a dedicated address). Any override domain must be verified in
- * the Resend account or the send is rejected.
+ * the Resend account or the send is rejected. `replyTo` sets where replies go
+ * (Resend's `reply_to`), so branded no-reply-style senders can still route
+ * human replies to a monitored inbox.
  */
-export async function sendEmail(input: { to: string; subject: string; html: string; from?: string }): Promise<void> {
+export async function sendEmail(input: {
+  to: string
+  subject: string
+  html: string
+  from?: string
+  replyTo?: string
+}): Promise<void> {
   const key = process.env.RESEND_API_KEY
   const from = input.from ?? process.env.FROM_EMAIL
   if (!key || !from) throw new Error('Email is not configured (RESEND_API_KEY / FROM_EMAIL)')
@@ -16,7 +24,13 @@ export async function sendEmail(input: { to: string; subject: string; html: stri
   const res = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: input.to, subject: input.subject, html: input.html }),
+    body: JSON.stringify({
+      from,
+      to: input.to,
+      subject: input.subject,
+      html: input.html,
+      ...(input.replyTo ? { reply_to: input.replyTo } : {}),
+    }),
   })
   if (!res.ok) throw new Error(`Resend error ${res.status}: ${await res.text()}`)
 }
@@ -195,6 +209,14 @@ const INVOICE_TERMS_HTML = `
  */
 const INVOICE_FROM_EMAIL = process.env.INVOICE_FROM_EMAIL ?? 'edynsgate Billing <billing@fyht4.com>'
 
+/**
+ * Where partner replies to invoice emails are routed. `From` is a branded
+ * billing address; set INVOICE_REPLY_TO to a monitored inbox so replies reach a
+ * human. Unset = replies go to the From address. Free-form negotiation is still
+ * best done via the in-app decline-with-notes → edit → resubmit loop.
+ */
+const INVOICE_REPLY_TO = process.env.INVOICE_REPLY_TO || undefined
+
 const invoiceUsd = (cents: number) => `$${(cents / 100).toFixed(2)}`
 
 /** Renders the line-item table with a project-total footer. */
@@ -278,7 +300,7 @@ export async function sendProjectInvoiceEmail(inv: InvoiceEmail): Promise<void> 
       ${INVOICE_TERMS_HTML}
       <p style="color:#6b6b60;font-size:13px">If accepted, a 50% deposit (or payment in full) is required before work begins.</p>
     </div>`
-  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Project proposal — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, replyTo: INVOICE_REPLY_TO, to: inv.recipient.email, subject: `Project proposal — ${inv.title}`, html })
 }
 
 /** Final invoice email after acceptance: summary + prominent pay link. */
@@ -296,7 +318,7 @@ export async function sendFinalInvoiceEmail(inv: InvoiceEmail): Promise<void> {
       ${invoiceButton(url, 'Review & pay')}
       ${INVOICE_TERMS_HTML}
     </div>`
-  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Invoice ready to pay — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, replyTo: INVOICE_REPLY_TO, to: inv.recipient.email, subject: `Invoice ready to pay — ${inv.title}`, html })
 }
 
 /** Completion email: finished-work photo + any remaining balance to pay. */
@@ -316,7 +338,7 @@ export async function sendBalanceDueEmail(inv: InvoiceEmail): Promise<void> {
       }
       ${INVOICE_TERMS_HTML}
     </div>`
-  await sendEmail({ from: INVOICE_FROM_EMAIL, to: inv.recipient.email, subject: `Work completed — ${inv.title}`, html })
+  await sendEmail({ from: INVOICE_FROM_EMAIL, replyTo: INVOICE_REPLY_TO, to: inv.recipient.email, subject: `Work completed — ${inv.title}`, html })
 }
 
 function escapeHtml(s: string): string {
