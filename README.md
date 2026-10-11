@@ -38,7 +38,7 @@ Other scripts: `npm run build`, `npm start`, `npm run lint`.
 
 ## Design system
 
-The look is the **"Oatmeal" Tailwind Plus kit** adapted to edynsgate. The full reference kit lives in [`demo/`](./demo) (a standalone app, excluded from our build and from git). **Everything you need from it is captured below and in `components/`, so `demo/` can be deleted.**
+The look is the **"Oatmeal" Tailwind Plus kit** adapted to edynsgate. (The `demo/` reference kit has been **deleted** — everything needed from it is captured below and in `components/`.)
 
 ### Tokens (`app/globals.css`)
 
@@ -77,32 +77,62 @@ Small, composable, single-responsibility pieces. Each takes `className` + `...pr
 
 ```
 app/
-  layout.tsx              Root layout: fonts, <Navbar>, <Main>, <Footer>
+  layout.tsx              Root layout: fonts, <Navbar>, <Main>, <Footer>, org JSON-LD
   page.tsx                Marketing home (hero, pillars, audiences, CTA)
   globals.css             Tailwind v4 import + olive theme tokens
-  actions/auth.ts         Server Actions: loginPartner/Tenant/Admin, logout
-  partners/
-    login/page.tsx        Partner login (UI)
-    page.tsx              Partner portal (protected stub)
-  tenants/
-    login/page.tsx        Tenant login (UI)
-    page.tsx              Tenant portal (protected stub)
-  admin/
-    login/page.tsx        Admin password gate (UI)
-    page.tsx              Admin dashboard (protected stub)
+  privacy/ terms/         Legal pages
+  programs/               Public program explainers (property-partners, tenants)
+  properties/             Public listings + [id] detail (move-in requests)
+  actions/                Server Actions: auth, admin, admin-create, partners,
+                          tenants, properties, moveins, payouts, invoices, plaid
+  partners/               Partner portal: enroll, login, set-password,
+                          properties (list + new), payouts
+  tenants/                Tenant portal: enroll (+ complete), login, set-password,
+                          plaid-oauth (OAuth return page)
+  admin/                  Admin portal: dashboard, partners, properties,
+                          tenants (+ import from Stripe), move-ins, payouts,
+                          invoices (list / new / [id] detail)
+  invoices/[token]/       PUBLIC invoice page (accept / decline / pay) + paid/ receipt
+  api/
+    stripe/webhook/       Stripe webhook — routes by metadata.type (see gotchas!)
+    identity/             Stripe Identity: start, status, webhook
+    plaid/webhook/        Plaid income webhooks
+    tenants/plaid/link-token/   Plaid Link token creation
+    partners/upload/, tenants/upload/   Vercel Blob client uploads
+    cron/income-check/    Daily income re-check (vercel.json cron + CRON_SECRET)
 lib/
   mongodb.ts              Lazy, cached MongoClient (getDb())
-  session.ts              jose JWT cookie sessions (encrypt/decrypt/create/get/delete)
-  users.ts               User collection access (bcrypt verify/create)
-  dal.ts                 Data Access Layer: requireSession / requireRole
+  session.ts              jose JWT cookie sessions (create/get/delete)
+  dal.ts                  requireSession / requireRole — the authoritative gate
+  users.ts                users collection (bcrypt verify/create)
+  tenants.ts              tenant records, billing status/frequency
+  properties.ts           property records
+  moveins.ts              move-in requests
+  payouts.ts              partner payouts
+  equity.ts               partner equity reports
+  invoices.ts             project invoices: draft→sent→accepted→completed
+  income.ts               monthly-income math from Plaid payroll data
+  plaid.ts                Plaid client (link/user tokens, payroll income)
+  stripe.ts               Stripe client + business constants + subscription import
+  email.ts                Resend senders (credentials, approval, equity, invoices…)
+  crypto.ts               AES-256-GCM (EE_ENCRYPTION_KEY) for Plaid tokens at rest
+  ratelimit.ts            Mongo-backed rate limiting
+  tiers.ts                housing tier ladder (tier 0 apartment → up)
+  format.ts               currency formatting helpers
 components/
-  elements/              Design-system primitives (from the kit)
-  icons/                 SVG icon set (from the kit)
-  auth/                  login-form, auth-shell, logout-button
-  site/                  navbar, footer, logo, portal-shell
-proxy.ts                 Route protection (Next 16 "Middleware")
-scripts/seed.mjs         Seed demo accounts
-demo/                    Reference kit (git-ignored; safe to delete)
+  elements/               Design-system primitives (from the kit)
+  icons/                  SVG icon set (from the kit)
+  auth/                   login / enroll / set-password forms, auth-shell, logout
+  site/                   navbar, footer, logo, mobile-menu, portal-shell, secret-admin
+  admin/                  admin forms (invoices, tenants, partners, Stripe import…)
+  partners/               property form/cards, image uploader, equity report modal
+  tenants/                Plaid + Stripe Identity verify buttons, paystub uploader
+  properties/             public property cards, filters, move-in button
+  invoices/               public invoice summary
+proxy.ts                  Route protection (Next 16 "Middleware")
+scripts/                  seed.mjs + Plaid sandbox/e2e probe scripts
+docs/                     stripe-identity-setup.md + vendor notes (Resend receiving)
+vercel.json               Cron: /api/cron/income-check daily at 12:00 UTC
 ```
 
 ---
@@ -133,41 +163,65 @@ All config lives in `.env` (git-ignored). The repo's values are placeholders for
 
 | Variable | Used by | Status |
 |---|---|---|
-| `NEXTAUTH_SECRET` | **session signing** (`lib/session.ts`) | ✅ used now — set a strong value (`openssl rand -base64 32`) |
-| `NEXTAUTH_URL` | base URL | reserved |
-| `ADMIN_PASSWORD` | **admin login** (`app/actions/auth.ts`) | ✅ used now |
-| `ADMIN_CREATION_SECRET` | future admin bootstrapping | reserved |
-| `MONGODB_URI` | **database** (`lib/mongodb.ts`) | ✅ used now — **stale, replace** |
-| `MONGODB_DATABASE` | DB name (`edyns`) | ✅ used now |
-| `BLOB_READ_WRITE_TOKEN` | Vercel Blob (file storage) | configured — **stale, replace** — not wired yet |
-| `RESEND_API_KEY`, `FROM_EMAIL`, `FROM_EMAIL_TRAXXAS`, `APPLICATION_EMAIL` | Resend (transactional email) | configured — not wired yet |
-| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe (billing) | configured — not wired yet |
-| `PLAID_*`, `NEXT_PUBLIC_PLAID_ENV`, `EE_ENCRYPTION_KEY` | Plaid "Effort Exchange" (KYC / bank link / income) | configured — not wired yet |
-| `ACS_*` | Azure Communication Services (SMS / phone) | configured — not wired yet |
-| `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_APP_URL`, `STORE_*` | app URLs / store metadata | reserved |
-| `TEST_PRODUCTION_MODE` | test flag | reserved |
+| `NEXTAUTH_SECRET` | **session signing** (`lib/session.ts`) | ✅ wired — set a strong value (`openssl rand -base64 32`) |
+| `ADMIN_PASSWORD` | **admin login** (`app/actions/auth.ts`) | ✅ wired |
+| `MONGODB_URI`, `MONGODB_DATABASE` | **database** (`lib/mongodb.ts`) | ✅ wired |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob uploads — read implicitly by `@vercel/blob` (upload routes) | ✅ wired |
+| `RESEND_API_KEY`, `FROM_EMAIL` | Resend sender (`lib/email.ts`) | ✅ wired |
+| `ALERT_EMAIL` | security-alert recipient (falls back to `FROM_EMAIL`) | optional |
+| `INVOICE_FROM_EMAIL` | project-invoice sender (default `edynsgate Billing <billing@fyht4.com>`) | optional |
+| `INVOICE_REPLY_TO` | reply-to on invoice emails → a monitored inbox | optional |
+| `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` | Stripe billing, checkout, webhook (`lib/stripe.ts`, `app/api/stripe/webhook`) | ✅ wired |
+| `STRIPE_IDENTITY_WEBHOOK_SECRET` | Stripe Identity webhook (falls back to `STRIPE_WEBHOOK_SECRET`) | ✅ wired |
+| `PLAID_CLIENT_ID`, `PLAID_ENV`, `PLAID_SANDBOX_SECRET` / `PLAID_PRODUCTION_SECRET` (or `PLAID_SECRET`), `PLAID_REDIRECT_URI`, `PLAID_WEBHOOK_URL` | Plaid income verification (`lib/plaid.ts`) | ✅ wired |
+| `EE_ENCRYPTION_KEY` | AES-256-GCM key for Plaid tokens at rest (`lib/crypto.ts`) | ✅ wired |
+| `CRON_SECRET` | authorizes `/api/cron/income-check` | ✅ wired |
+| `NEXT_PUBLIC_BASE_URL` | absolute URLs in emails / Stripe + Plaid redirects | ✅ wired |
+| `NEXTAUTH_URL`, `ADMIN_CREATION_SECRET`, `NEXT_PUBLIC_APP_URL`, `STORE_*`, `TEST_PRODUCTION_MODE`, `ACS_*` | reserved — not referenced in code | — |
 
 > 🔐 `.env` is git-ignored. Never commit real keys. Rotate any key that has been shared.
 
-### Service integration map (build these "one by one")
+### Service integrations (current state)
 
-Each service already has credentials in `.env`; wire each behind a `lib/<service>.ts` client when its feature is built:
+All major services are **wired** behind `lib/<service>.ts` clients:
 
-- **MongoDB** → `lib/mongodb.ts` (done). Add collections as features land.
-- **Vercel Blob** → file/document uploads (partner docs, tenant docs).
-- **Stripe** → rent/billing: Customers + PaymentIntents/Checkout + webhooks at `app/api/stripe/webhook/route.ts`.
-- **Plaid** → tenant KYC, bank linking, income verification ("Effort Exchange"). Encrypt `plaidAccessToken` at rest with `EE_ENCRYPTION_KEY`.
-- **Resend** → transactional email (welcome, password reset, notices).
-- **Azure Communication Services** → SMS/phone notifications.
+- **MongoDB** → `lib/mongodb.ts`. Collections: users, tenants, properties, move-ins, payouts, equity, invoices, rate limits.
+- **Vercel Blob** → client uploads via `handleUpload` (`app/api/partners/upload`, `app/api/tenants/upload`): property photos, paystubs, invoice work photos.
+- **Stripe** → tenant billing (checkout + subscriptions, incl. importing existing subscriptions by ID), project invoices, webhook at `app/api/stripe/webhook/route.ts`. Business constants in `lib/stripe.ts`: $25 application fee, 40% collection rate, 35 required weekly hours.
+- **Stripe Identity** → ID + selfie verification (`app/api/identity/*`); replication guide in `docs/stripe-identity-setup.md`.
+- **Plaid** → income verification via **user tokens + payroll income** (standard Income product, **not** CRA). Access tokens encrypted at rest with `EE_ENCRYPTION_KEY`. Daily re-check via the cron route. Sandbox/e2e probe scripts in `scripts/`.
+- **Resend** → credentials, welcome-back, approval, security-alert, equity-report, and project-invoice emails (`lib/email.ts`). Invoice mail sends from `INVOICE_FROM_EMAIL` with `INVOICE_REPLY_TO`.
+- **Azure Communication Services** → **not wired** (credentials reserved for future SMS).
 
 When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) — there is no `pages/` router in this project.
+
+---
+
+## Business rules (do not get these wrong)
+
+- **Eligibility = effort, never income.** Tenant approval is based **only** on the 35-hr/week effort commitment. Income is **never** an approval criterion — Plaid income data is used solely to set the rent amount (40% of verified monthly income, `COLLECTION_RATE` in `lib/stripe.ts`).
+- **Stripe Checkout sessions MUST set `metadata.type`.** The webhook routes on it (e.g. `type: 'project_invoice'` + `invoiceId` + `phase`). A session without it is treated as a **tenant fee** and misrouted.
+- **Project-invoice flow** (admin-only): propose (`draft`→`sent`, proposal email) → recipient accepts/declines on the public `/invoices/[token]` page → pay in full or 50% deposit via Stripe Checkout → admin completes with a finished-work photo (`completed`, balance-due email). Statuses in `lib/invoices.ts`.
+- **Plaid is the standard Income product** (user tokens + payroll income), **not** CRA — don't "upgrade" the integration to CRA endpoints.
+- **Sister-program cross-links live in 3 synced spots:** footer nav, layout JSON-LD `sameAs`, and `SISTER-APPS.md` / `SEO-BACKLINKS.md`. Change one → change all three.
 
 ---
 
 ## Notes & gotchas
 
 - **No `pages/` directory.** This is a pure App Router app. A top-level `pages/` folder would switch on the legacy Pages Router and conflict.
-- **Proxy ≠ Middleware filename.** The file is `proxy.ts` and exports `proxy()` + `config.matcher`.
+- **Proxy ≠ Middleware filename.** The file is `proxy.ts` and exports `proxy()` + `config.matcher` for `/partners`, `/tenants`, `/admin` (login/enroll paths are public).
 - **`@/*` path alias** maps to the **project root** (see `tsconfig.json`), e.g. `@/components/...`, `@/lib/...`.
 - **Mongo client is lazy** — it connects on first `getDb()`, not at import, so `next build` works without a reachable DB.
-- **`demo/` is excluded** from `tsconfig.json` and git, and depends on the `@tailwindplus/elements` insiders package. It's reference-only — delete it once you're comfortable with this README.
+- **`demo/` is gone** — the reference kit was deleted after its pieces were absorbed into `components/`.
+- **Cron:** `vercel.json` schedules `/api/cron/income-check` daily at 12:00 UTC; the route requires the `CRON_SECRET` bearer token.
+- **Verify with `npm run build`** — there is no test suite; live smoke-testing is done manually.
+
+---
+
+## Related docs
+
+- [`AGENTS.md`](./AGENTS.md) — **read first**: Next.js 16 breaking-changes warning (docs in `node_modules/next/dist/docs/`).
+- [`SISTER-APPS.md`](./SISTER-APPS.md) / [`SEO-BACKLINKS.md`](./SEO-BACKLINKS.md) — VA Corp network cross-linking (footer + JSON-LD).
+- [`STRIPE_IDENTITY_SETUP.md`](./STRIPE_IDENTITY_SETUP.md) — generic Stripe Identity guide; [`docs/stripe-identity-setup.md`](./docs/stripe-identity-setup.md) — how **this** app implements it.
+- [`docs/vendor/resend-receiving-emails.md`](./docs/vendor/resend-receiving-emails.md) — Resend inbound-email notes.
