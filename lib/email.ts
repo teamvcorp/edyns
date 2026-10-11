@@ -97,6 +97,49 @@ export async function sendWelcomeBackEmail(input: {
 }
 
 /**
+ * Invitation to start a tenant application. `enrollUrl` carries the single-use
+ * invite token (see lib/invites.ts). When the admin attached a property, we show
+ * it for context — but the copy is deliberately honest: we've noted their
+ * interest, we do NOT promise the home (placement needs approval first).
+ */
+export async function sendTenantInviteEmail(input: {
+  to: string
+  name: string
+  enrollUrl: string
+  expiresInDays: number
+  property?: { address: string; tierLabel: string; url: string; thumbnailUrl?: string }
+}): Promise<void> {
+  const p = input.property
+  const propertyBlock = p
+    ? `
+      <div style="border:1px solid #e3e3da;border-radius:12px;overflow:hidden;margin:16px 0">
+        ${p.thumbnailUrl ? `<img src="${escapeHtml(p.thumbnailUrl)}" alt="" width="100%" style="display:block;max-height:220px;object-fit:cover"/>` : ''}
+        <div style="padding:12px 16px">
+          <strong>${escapeHtml(p.address)}</strong><br/>
+          <span style="color:#6b6b60;font-size:13px">${escapeHtml(p.tierLabel)}</span><br/>
+          <a href="${escapeHtml(p.url)}" style="font-size:13px">View this home</a>
+        </div>
+      </div>
+      <p>We’ve noted your interest in this home. Once your application is approved you can request to move in, and we’ll
+      keep it in mind — availability is confirmed at that stage.</p>`
+    : ''
+
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">You’re invited to apply, ${escapeHtml(input.name)}</h2>
+      <p>edynsgate invites you to apply to the Effort Exchange housing program.</p>
+      ${propertyBlock}
+      <p>Applying takes a few minutes: tell us about your household, then pay a <strong>$25 application fee</strong>. Your
+      application stays pending until an admin reviews and approves it.</p>
+      <p><a href="${escapeHtml(input.enrollUrl)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Start your application</a></p>
+      <p style="color:#6b6b60;font-size:13px">This personal link expires in ${input.expiresInDays} days and can be used once.
+      If you weren’t expecting this email, you can safely ignore it.</p>
+    </div>`
+
+  await sendEmail({ to: input.to, subject: 'You’re invited to apply to edynsgate', html })
+}
+
+/**
  * Approval email: the tenant is approved and must finish income verification
  * (connect a bank via Plaid OR upload their most recent paystub) before we set
  * up rent collection.

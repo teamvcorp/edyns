@@ -108,15 +108,22 @@ export interface TenantDoc {
   /** Tenants start at tier 0 on approval and move up as they relocate. */
   currentTier?: number
   currentPropertyId?: ObjectId
+  /**
+   * Property the tenant found us through (set from an admin invite). A HINT for
+   * admin context and client reassurance only — it never creates a move-in
+   * request and grants no claim on the home; placement still needs approval.
+   */
+  interestedPropertyId?: ObjectId
   createdAt: Date
   updatedAt: Date
   approvedAt?: Date
 }
 
-export type Tenant = Omit<TenantDoc, '_id' | 'userId' | 'currentPropertyId'> & {
+export type Tenant = Omit<TenantDoc, '_id' | 'userId' | 'currentPropertyId' | 'interestedPropertyId'> & {
   id: string
   userId: string
   currentPropertyId?: string
+  interestedPropertyId?: string
 }
 
 async function tenantsCollection(): Promise<Collection<TenantDoc>> {
@@ -132,12 +139,13 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
 }
 
 function toTenant(doc: TenantDoc): Tenant {
-  const { _id, userId, currentPropertyId, ...rest } = doc
+  const { _id, userId, currentPropertyId, interestedPropertyId, ...rest } = doc
   return {
     ...rest,
     id: _id.toString(),
     userId: userId.toString(),
     currentPropertyId: currentPropertyId?.toString(),
+    interestedPropertyId: interestedPropertyId?.toString(),
   }
 }
 
@@ -153,6 +161,8 @@ export async function createTenantApplication(
     children: Person[]
     employment: Employment
     feeAmountCents: number
+    /** From an admin invite — see TenantDoc.interestedPropertyId. */
+    interestedPropertyId?: string
   },
 ): Promise<Tenant> {
   const col = await tenantsCollection()
@@ -170,6 +180,10 @@ export async function createTenantApplication(
     employment: input.employment,
     status: 'pending',
     fee: { status: 'unpaid', amountCents: input.feeAmountCents },
+    interestedPropertyId:
+      input.interestedPropertyId && ObjectId.isValid(input.interestedPropertyId)
+        ? new ObjectId(input.interestedPropertyId)
+        : undefined,
     createdAt: now,
     updatedAt: now,
   }

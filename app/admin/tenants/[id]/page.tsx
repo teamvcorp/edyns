@@ -2,6 +2,8 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { requireRole } from '@/lib/dal'
 import { getTenantById } from '@/lib/tenants'
+import { getPropertyById } from '@/lib/properties'
+import { Link } from '@/components/elements/link'
 import { Container } from '@/components/elements/container'
 import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
@@ -52,6 +54,7 @@ export default async function AdminTenantReviewPage({
   const { welcome } = await searchParams
   const t = await getTenantById(id)
   if (!t) notFound()
+  const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
 
   return (
     <section className="py-16">
@@ -103,6 +106,17 @@ export default async function AdminTenantReviewPage({
             </SoftButton>
           </form>
         </Card>
+
+        {referredFrom && (
+          <Card className="flex flex-col gap-1">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Referred from a property</h3>
+            <p className="text-sm text-olive-950 dark:text-white">{formatAddress(referredFrom.address)}</p>
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              Invited with this home in mind (a hint only — no move-in request was filed).{' '}
+              <Link href={`/properties/${referredFrom.id}`}>View property</Link>
+            </p>
+          </Card>
+        )}
 
         <Card className="flex flex-col gap-4">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Head of household</h3>

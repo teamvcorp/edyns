@@ -11,6 +11,8 @@ import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
 import { PaystubUploader } from '@/components/tenants/paystub-uploader'
 import { SelfEmployedToggle } from '@/components/tenants/self-employed-toggle'
 import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
+import { MoveInButton } from '@/components/properties/move-in-button'
+import { hasActiveRequest } from '@/lib/moveins'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -81,6 +83,12 @@ export default async function TenantPortalPage({
     requests.map(async (r) => ({ request: r, property: await getPropertyById(r.propertyId) })),
   )
 
+  // Property they found us through (invite hint). Only surfaced while it's still
+  // approved; offered as a one-click request once the tenant is approved.
+  const hinted = tenant.interestedPropertyId ? await getPropertyById(tenant.interestedPropertyId) : null
+  const hintedProperty = hinted?.status === 'approved' ? hinted : null
+  const alreadyRequestedHinted = hintedProperty ? await hasActiveRequest(tenant.id, hintedProperty.id) : false
+
   return (
     <PortalShell eyebrow="Tenant portal" title={`Welcome, ${session.name ?? 'tenant'}`}>
       {/* Application status */}
@@ -96,6 +104,30 @@ export default async function TenantPortalPage({
           <p className="text-sm text-red-600 dark:text-red-400">Reason: {tenant.rejectionReason}</p>
         )}
       </Card>
+
+      {/* Property they found us through (reassurance only) */}
+      {hintedProperty && (
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">The home you’re interested in</h3>
+          <Text className="text-sm/6">
+            <p>
+              {formatAddress(hintedProperty.address)} · Tier {hintedProperty.tier ?? 0} · {tierLabel(hintedProperty.tier)}.{' '}
+              <Link href={`/properties/${hintedProperty.id}`}>View home</Link>
+            </p>
+          </Text>
+          {tenant.status === 'approved' ? (
+            alreadyRequestedHinted ? (
+              <p className="text-sm text-olive-700 dark:text-olive-300">You’ve requested this home — see below.</p>
+            ) : (
+              <MoveInButton propertyId={hintedProperty.id} />
+            )
+          ) : tenant.status === 'pending' ? (
+            <Text className="text-sm/6">
+              <p>We’ve noted your interest. Once your application is approved you can request to move in here.</p>
+            </Text>
+          ) : null}
+        </Card>
+      )}
 
       {/* Application fee */}
       <Card className="flex flex-col gap-3">

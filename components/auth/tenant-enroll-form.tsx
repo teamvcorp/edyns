@@ -16,6 +16,7 @@ function Field({
   placeholder,
   autoComplete,
   className,
+  lockedValue,
 }: {
   label: string
   name: string
@@ -25,6 +26,8 @@ function Field({
   placeholder?: string
   autoComplete?: string
   className?: string
+  /** Server-supplied value the applicant can't change (invited name/email). */
+  lockedValue?: string
 }) {
   const error = state?.errors?.[name]
   return (
@@ -39,9 +42,10 @@ function Field({
         required={required}
         placeholder={placeholder}
         autoComplete={autoComplete}
-        defaultValue={type === 'password' ? undefined : state?.values?.[name]}
+        defaultValue={lockedValue ?? (type === 'password' ? undefined : state?.values?.[name])}
+        readOnly={lockedValue !== undefined}
         aria-invalid={error ? true : undefined}
-        className={inputClass}
+        className={lockedValue !== undefined ? `${inputClass} opacity-70` : inputClass}
       />
       {error && (
         <span role="alert" className="text-xs font-normal text-red-600 dark:text-red-400">
@@ -110,9 +114,12 @@ type TenantAction = (prev: TenantEnrollState, formData: FormData) => Promise<Ten
 export function TenantEnrollForm({
   action = enrollTenant,
   mode = 'self',
+  invite,
 }: {
   action?: TenantAction
   mode?: 'self' | 'admin'
+  /** Present when the applicant arrived via an emailed invite link. */
+  invite?: { token: string; name: string; email: string }
 }) {
   const [state, formAction, pending] = useActionState(action, undefined)
   const [adults, setAdults] = useState<Person[]>([])
@@ -126,12 +133,13 @@ export function TenantEnrollForm({
     <form action={formAction} className="flex flex-col gap-8">
       <input type="hidden" name="adults" value={JSON.stringify(cleanAdults)} />
       <input type="hidden" name="children" value={JSON.stringify(cleanChildren)} />
+      {invite && <input type="hidden" name="inviteToken" value={invite.token} />}
 
       <fieldset className="flex flex-col gap-4">
         <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Head of household</legend>
-        <Field label="Full name" name="name" state={state} autoComplete="name" />
+        <Field label="Full name" name="name" state={state} autoComplete="name" lockedValue={invite?.name} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Email" name="email" type="email" state={state} autoComplete="email" />
+          <Field label="Email" name="email" type="email" state={state} autoComplete="email" lockedValue={invite?.email} />
           <Field label="Phone" name="phone" type="tel" state={state} autoComplete="tel" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">

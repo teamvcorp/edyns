@@ -2,27 +2,40 @@ import type { Metadata } from 'next'
 import { requireRole } from '@/lib/dal'
 import { listTenants } from '@/lib/tenants'
 import { getPropertyById } from '@/lib/properties'
+import { listInvites } from '@/lib/invites'
+import { resendInviteAction } from '@/app/actions/admin-invites'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
-import { ButtonLink, PlainButtonLink } from '@/components/elements/button'
+import { ButtonLink, PlainButtonLink, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Tenant applications' }
 
 const feeLabel = { unpaid: 'Fee unpaid', processing: 'Fee processing', paid: 'Fee paid' } as const
 const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' } as const
+const inviteCopy: Record<string, { ok: boolean; text: string }> = {
+  sent: { ok: true, text: 'Invite emailed.' },
+  failed: { ok: false, text: 'Invite saved, but the email failed to send — use Resend to try again.' },
+  unavailable: { ok: false, text: 'That invite is no longer available (already used or removed).' },
+  registered: { ok: false, text: 'That person has already registered a tenant account.' },
+  throttled: { ok: false, text: 'Too many invites sent this hour. Please try again later.' },
+}
+const inviteStatusLabel = { sent: 'Sent', used: 'Applied', expired: 'Expired' } as const
+
 const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
 
 export default async function AdminTenantsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ created?: string; email?: string }>
+  searchParams: Promise<{ created?: string; email?: string; invited?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const sp = await searchParams
-  const tenants = await listTenants()
+  const [tenants, invites] = await Promise.all([listTenants(), listInvites()])
+  // Used invites are already represented by their tenant row; show the rest.
+  const openInvites = invites.filter((i) => i.status !== 'used')
   const pending = tenants.filter((t) => t.status === 'pending')
   const stripePending = tenants.filter((t) => t.billing?.imported)
   const decided = tenants.filter((t) => t.status !== 'pending' && !t.billing?.imported)
@@ -65,7 +78,18 @@ export default async function AdminTenantsPage({
       breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Tenant applications' }]}
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
-        {sp.created ? (
+        {sp.invited && inviteCopy[sp.invited] ? (
+          <p
+            role="status"
+            className={
+              inviteCopy[sp.invited].ok
+                ? 'text-sm text-olive-700 dark:text-olive-300'
+                : 'text-sm text-red-600 dark:text-red-400'
+            }
+          >
+            {inviteCopy[sp.invited].text}
+          </p>
+        ) : sp.created ? (
           <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
             Tenant created.{sp.email === 'failed' ? ' (Credentials email failed to send — share the password manually.)' : ' Credentials emailed.'}
           </p>
@@ -74,6 +98,7 @@ export default async function AdminTenantsPage({
         )}
         <div className="flex items-center gap-2">
           <PlainButtonLink href="/admin/tenants/import">Import from Stripe</PlainButtonLink>
+          <PlainButtonLink href="/admin/tenants/invite">Invite tenant</PlainButtonLink>
           <ButtonLink href="/admin/tenants/new">Add tenant</ButtonLink>
         </div>
       </div>
@@ -90,6 +115,36 @@ export default async function AdminTenantsPage({
           <div className="flex flex-col gap-3">{pending.map((t) => <Row key={t.id} t={t} />)}</div>
         )}
       </div>
+
+      {openInvites.length > 0 && (
+        <div className="flex flex-col gap-6">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
+            Invitations ({openInvites.length})
+          </h3>
+          <div className="flex flex-col gap-3">
+            {openInvites.map((i) => (
+              <Card key={i.id} className="flex flex-wrap items-center justify-between gap-4 py-5">
+                <div className="flex flex-col">
+                  <span className="font-medium text-olive-950 dark:text-white">{i.name}</span>
+                  <span className="text-sm text-olive-600 dark:text-olive-500">
+                    {i.email} · sent {i.sendCount}× · {i.status === 'expired' ? 'expired' : 'expires'}{' '}
+                    {i.expiresAt.toLocaleDateString()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">
+                    {inviteStatusLabel[i.status]}
+                  </span>
+                  <form action={resendInviteAction}>
+                    <input type="hidden" name="id" value={i.id} />
+                    <SoftButton type="submit">Resend</SoftButton>
+                  </form>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {stripeRows.length > 0 && (
         <div className="flex flex-col gap-6">

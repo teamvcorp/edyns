@@ -6,11 +6,25 @@ import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
 import { Link } from '@/components/elements/link'
 import { TenantEnrollForm } from '@/components/auth/tenant-enroll-form'
+import { getValidInviteByToken } from '@/lib/invites'
+import { getPropertyById } from '@/lib/properties'
+import { formatAddress } from '@/lib/format'
+import { tierLabel } from '@/lib/tiers'
 
 export const metadata: Metadata = { title: 'Tenant application' }
 
-export default async function TenantEnrollPage({ searchParams }: { searchParams: Promise<{ canceled?: string }> }) {
-  const { canceled } = await searchParams
+export default async function TenantEnrollPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ canceled?: string; invite?: string }>
+}) {
+  const { canceled, invite: inviteToken } = await searchParams
+
+  // Validate the invite server-side. The property (if any) comes from the invite
+  // record, never from the URL, and is only shown while it's still approved.
+  const invite = inviteToken ? await getValidInviteByToken(inviteToken) : null
+  const inviteProperty = invite?.propertyId ? await getPropertyById(invite.propertyId) : null
+  const showProperty = inviteProperty?.status === 'approved' ? inviteProperty : null
 
   return (
     <section className="py-16 sm:py-20">
@@ -24,13 +38,34 @@ export default async function TenantEnrollPage({ searchParams }: { searchParams:
             </Text>
           </div>
 
+          {inviteToken && !invite && (
+            <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
+              This invitation link has expired or was already used. You can still apply below, or ask us for a new invite.
+            </p>
+          )}
+
+          {showProperty && (
+            <div className="rounded-xl bg-olive-950/5 px-4 py-3 text-sm dark:bg-white/5">
+              <p className="font-medium text-olive-950 dark:text-white">
+                You’re applying with interest in {formatAddress(showProperty.address)}
+              </p>
+              <p className="text-olive-600 dark:text-olive-500">
+                Tier {showProperty.tier ?? 0} · {tierLabel(showProperty.tier)}. We’ve noted your interest — you can request
+                to move in once your application is approved.{' '}
+                <Link href={`/properties/${showProperty.id}`}>View this home</Link>
+              </p>
+            </div>
+          )}
+
           {canceled && (
             <p role="alert" className="text-sm text-amber-700 dark:text-amber-400">
               Payment was canceled. Your application is saved — you can pay the fee any time from your portal.
             </p>
           )}
 
-          <TenantEnrollForm />
+          <TenantEnrollForm
+            invite={invite && inviteToken ? { token: inviteToken, name: invite.name, email: invite.email } : undefined}
+          />
 
           <div className="text-sm text-olive-700 dark:text-olive-400">
             Already applied? <Link href="/tenants/login">Sign in</Link>

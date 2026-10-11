@@ -17,6 +17,8 @@ import {
 } from '@/lib/tenants'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+import { getValidInviteByToken, claimInvite, releaseInvite, linkInviteToTenant } from '@/lib/invites'
+import { getPropertyById } from '@/lib/properties'
 
 export type TenantEnrollState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string }
@@ -96,6 +98,22 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
   for (const f of fields) values[f] = get(f)
   const password = String(formData.get('password') ?? '')
 
+  // Invited applicants: the server-side invite record is authoritative for name,
+  // email and the property hint. The browser only carries the opaque token, so
+  // none of these can be altered by editing the form or URL.
+  const inviteToken = String(formData.get('inviteToken') ?? '')
+  const invite = inviteToken ? await getValidInviteByToken(inviteToken) : null
+  if (inviteToken && !invite) {
+    return {
+      message: 'This invitation link has expired or was already used. Ask us for a new invite, or apply from the public form.',
+      values,
+    }
+  }
+  if (invite) {
+    values.name = invite.name
+    values.email = invite.email
+  }
+
   const errors: Record<string, string> = {}
   if (!values.name) errors.name = 'Enter the head of household’s name.'
   if (!values.email) errors.email = 'Enter an email.'
@@ -122,11 +140,25 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
     return { errors: { email: 'A tenant account with this email already exists. Please sign in.' }, values }
   }
 
+  // Single-use: claim the invite atomically BEFORE creating anything, so two
+  // concurrent submissions can't both redeem it. Released again on failure.
+  if (invite && !(await claimInvite(invite.id))) {
+    return { message: 'This invitation link was already used. Please sign in, or ask us for a new invite.', values }
+  }
+
+  // Only keep the property hint if it still exists and is approved.
+  let interestedPropertyId: string | undefined
+  if (invite?.propertyId) {
+    const p = await getPropertyById(invite.propertyId)
+    if (p && p.status === 'approved') interestedPropertyId = p.id
+  }
+
   let checkoutUrl: string
+  let applicationCreated = false
   try {
     const user = await createUser({ email: values.email, name: values.name, password, role: 'tenant' })
 
-    await createTenantApplication(user.id, {
+    const tenant = await createTenantApplication(user.id, {
       name: values.name,
       email: values.email,
       phone: values.phone,
@@ -148,7 +180,10 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
         employerPhone: values.employerPhone || undefined,
       },
       feeAmountCents: applicationTotalCents(),
+      interestedPropertyId,
     })
+    applicationCreated = true
+    if (invite) await linkInviteToTenant(invite.id, tenant.id)
 
     // Sign them in now so they can resume payment / see pending status even if they bail on Checkout.
     await createSession({ sub: user.id, role: 'tenant', name: user.name })
@@ -164,6 +199,10 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
 
     checkoutUrl = await startFeeCheckout({ userId: user.id, email: values.email, customerId: customer.id })
   } catch (e) {
+    // Failed before the application existed → let them retry with the same
+    // link. Once the application exists the invite stays consumed (they can
+    // sign in and resume payment from the portal).
+    if (invite && !applicationCreated) await releaseInvite(invite.id)
     if (e instanceof Stripe.errors.StripeError) {
       return { message: 'Payment setup failed. Please try again.', values }
     }
