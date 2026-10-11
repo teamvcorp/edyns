@@ -2,12 +2,16 @@
 
 import { redirect } from 'next/navigation'
 import { requireRole } from '@/lib/dal'
-import { createUser, isEmailTaken, registerPartner } from '@/lib/users'
+import { createUser, isEmailTaken, registerPartner, findPartnerById } from '@/lib/users'
+import { createPropertyAsAdmin } from '@/lib/properties'
+import { parsePropertyForm } from '@/lib/property-input'
+import { revalidatePath } from 'next/cache'
 import { createTenantApplication, type Person } from '@/lib/tenants'
 import { applicationTotalCents } from '@/lib/stripe'
 import { sendCredentialsEmail } from '@/lib/email'
 import type { TenantEnrollState } from '@/app/actions/tenants'
 import type { EnrollState } from '@/app/actions/partners'
+import type { PropertyEditState } from '@/app/actions/admin'
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -154,4 +158,42 @@ export async function createPartnerByAdmin(_prev: EnrollState, formData: FormDat
   }
 
   redirect(`/admin/partners?created=1${emailed ? '' : '&email=failed'}`)
+}
+
+/**
+ * Admin takes in a new property on a partner's behalf (e.g. an acquisition or a
+ * paper submission). Same validation as every other property form
+ * (lib/property-input.ts). Because an admin is entering it, they may set status,
+ * tier and equity up front — an "approved" property must be fully priced.
+ */
+export async function createPropertyByAdmin(
+  _prev: PropertyEditState,
+  formData: FormData,
+): Promise<PropertyEditState> {
+  await requireRole('admin', '/admin/login')
+
+  const parsed = parsePropertyForm(formData, { admin: true })
+  const partnerId = String(formData.get('partnerId') ?? '').trim()
+
+  const errors: Record<string, string> = parsed.ok ? {} : { ...parsed.errors }
+  const values = { ...parsed.values, partnerId }
+
+  // The owner must be a real partner account (never trust the posted id).
+  if (!partnerId) errors.partnerId = 'Choose the partner who owns this property.'
+  else if (!(await findPartnerById(partnerId))) errors.partnerId = 'Choose an existing partner.'
+
+  if (!parsed.ok || Object.keys(errors).length > 0) return { errors, values }
+
+  const property = await createPropertyAsAdmin(partnerId, {
+    ...parsed.input,
+    status: parsed.admin!.status,
+    equityGenerated: parsed.admin!.equityGenerated,
+    equitySharePercent: parsed.admin!.equitySharePercent,
+  })
+
+  revalidatePath('/admin/properties')
+  revalidatePath('/properties')
+  revalidatePath('/partners/properties')
+  revalidatePath('/partners')
+  redirect(`/admin/properties/${property.id}?created=1`) // throws NEXT_REDIRECT
 }

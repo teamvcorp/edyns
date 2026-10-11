@@ -5,6 +5,7 @@ import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
+import { ButtonLink } from '@/components/elements/button'
 import { PropertyReviewCard } from '@/components/admin/property-review-card'
 
 export const metadata: Metadata = { title: 'Property review' }
@@ -22,6 +23,10 @@ export default async function AdminPropertiesPage() {
       title="Property review"
       breadcrumbs={[{ label: 'Admin dashboard', href: '/admin' }, { label: 'Property review' }]}
     >
+      <div className="flex justify-end">
+        <ButtonLink href="/admin/properties/new">Add property</ButtonLink>
+      </div>
+
       <div className="flex flex-col gap-6">
         <Subheading className="text-2xl/8">Pending approval ({pending.length})</Subheading>
         {pending.length === 0 ? (

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound } from 'next/navigation'
 import { requireRole } from '@/lib/dal'
 import { getPropertyById } from '@/lib/properties'
+import { listPartners } from '@/lib/users'
 import { findTenantByProperty } from '@/lib/tenants'
 import { adminDeletePropertyAction, addCashRentPaymentAction } from '@/app/actions/admin'
 import { Container } from '@/components/elements/container'
@@ -31,15 +32,16 @@ export default async function AdminPropertyEditPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ cash?: string }>
+  searchParams: Promise<{ cash?: string; created?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { cash } = await searchParams
+  const { cash, created } = await searchParams
 
   const property = await getPropertyById(id)
   if (!property) notFound()
 
+  const partners = await listPartners()
   const tenant = property.status === 'approved' ? await findTenantByProperty(id) : null
   const cashInfo = cash ? cashCopy[cash] : undefined
 
@@ -57,10 +59,18 @@ export default async function AdminPropertyEditPage({
           />
           <Eyebrow>Administration</Eyebrow>
           <Subheading className="text-3xl/9 sm:text-4xl/12">Edit property</Subheading>
+          {created && (
+            <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
+              Property added. The partner will see it when they sign in.
+            </p>
+          )}
         </div>
 
         <Card className="p-8 sm:p-10">
-          <PropertyEditForm property={property} />
+          <PropertyEditForm
+            property={property}
+            partners={partners.map((p) => ({ id: p.id, label: `${p.name} (${p.email})` }))}
+          />
         </Card>
 
         {property.status === 'approved' && (

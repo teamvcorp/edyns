@@ -32,13 +32,26 @@ export interface PropertyDoc {
   incomeRequirement?: number
   status: PropertyStatus
   rejectionReason?: string
+  /** True when an admin took this property in on a partner's behalf (audit trail). */
+  createdByAdmin?: boolean
+  /**
+   * Previous owners, oldest first. Properties are bought and sold, so ownership
+   * can be transferred; each entry records who held it and until when. Equity
+   * already earned stays with the partner it was credited to (see lib/equity.ts) —
+   * only FUTURE rent accrues to the new owner.
+   */
+  ownershipHistory?: { partnerId: ObjectId; until: Date }[]
   createdAt: Date
   updatedAt: Date
   approvedAt?: Date
 }
 
 /** Plain, serializable shape for passing to Client Components. */
-export type Property = Omit<PropertyDoc, '_id' | 'partnerId'> & { id: string; partnerId: string }
+export type Property = Omit<PropertyDoc, '_id' | 'partnerId' | 'ownershipHistory'> & {
+  id: string
+  partnerId: string
+  ownershipHistory?: { partnerId: string; until: Date }[]
+}
 
 export interface PropertyInput {
   address: Address
@@ -65,8 +78,14 @@ async function propertiesCollection(): Promise<Collection<PropertyDoc>> {
 }
 
 function toProperty(doc: PropertyDoc): Property {
-  const { _id, partnerId, ...rest } = doc
-  return { ...rest, id: _id.toString(), partnerId: partnerId.toString() }
+  const { _id, partnerId, ownershipHistory, ...rest } = doc
+  return {
+    ...rest,
+    id: _id.toString(),
+    partnerId: partnerId.toString(),
+    // ObjectIds aren't serializable to Client Components — expose plain strings.
+    ownershipHistory: ownershipHistory?.map((h) => ({ partnerId: h.partnerId.toString(), until: h.until })),
+  }
 }
 
 export async function createProperty(partnerId: string, input: PropertyInput): Promise<Property> {
@@ -82,6 +101,49 @@ export async function createProperty(partnerId: string, input: PropertyInput): P
   }
   await col.insertOne(doc)
   return toProperty(doc)
+}
+
+/**
+ * Admin intake: create a property on a partner's behalf in a single write, with
+ * the admin-controlled fields (status, tier, equity…) set up front. An approved
+ * property gets its approval timestamp, matching approveProperty/updateProperty.
+ */
+export async function createPropertyAsAdmin(
+  partnerId: string,
+  input: PropertyInput & { status: PropertyStatus; equityGenerated?: number },
+): Promise<Property> {
+  const col = await propertiesCollection()
+  const now = new Date()
+  const doc: PropertyDoc = {
+    _id: new ObjectId(),
+    partnerId: new ObjectId(partnerId),
+    ...input,
+    createdByAdmin: true,
+    createdAt: now,
+    updatedAt: now,
+    ...(input.status === 'approved' ? { approvedAt: now } : {}),
+  }
+  await col.insertOne(doc)
+  return toProperty(doc)
+}
+
+/**
+ * Transfer ownership (property bought/sold). Atomic: the previous owner is
+ * pushed onto ownershipHistory in the same update that sets the new owner, and
+ * the filter on the current owner stops a stale form from clobbering a transfer
+ * made in the meantime. Returns false if nothing matched.
+ */
+export async function transferProperty(id: string, fromPartnerId: string, toPartnerId: string): Promise<boolean> {
+  if (!ObjectId.isValid(id) || !ObjectId.isValid(fromPartnerId) || !ObjectId.isValid(toPartnerId)) return false
+  const col = await propertiesCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(id), partnerId: new ObjectId(fromPartnerId) },
+    {
+      $set: { partnerId: new ObjectId(toPartnerId), updatedAt: new Date() },
+      $push: { ownershipHistory: { partnerId: new ObjectId(fromPartnerId), until: new Date() } },
+    },
+  )
+  return res.matchedCount === 1
 }
 
 export async function listPropertiesByPartner(partnerId: string): Promise<Property[]> {

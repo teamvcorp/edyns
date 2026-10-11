@@ -148,9 +148,12 @@ export default async function AdminPartnerEditPage({
 
         {/* Their properties */}
         <Card className="flex flex-col gap-4">
-          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
-            Properties ({properties.length})
-          </h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
+              Properties ({properties.length})
+            </h3>
+            <Link href={`/admin/properties/new?partner=${id}`}>Add a property for this partner</Link>
+          </div>
           {properties.length === 0 ? (
             <Text className="text-sm/6">
               <p>This partner has no properties.</p>

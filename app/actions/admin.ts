@@ -10,7 +10,9 @@ import {
   adminDeleteProperty,
   listPropertiesByPartner,
   getPropertyById,
+  transferProperty,
 } from '@/lib/properties'
+import { parsePropertyForm } from '@/lib/property-input'
 import { updatePartner, deletePartner, findPartnerById, resetUserPassword } from '@/lib/users'
 import {
   approveTenant,
@@ -164,114 +166,47 @@ export type PropertyEditState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string; ok?: boolean }
   | undefined
 
-function num(v: string): number | null {
-  if (v.trim() === '') return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
 export async function updatePropertyAction(_prev: PropertyEditState, formData: FormData): Promise<PropertyEditState> {
   await requireRole('admin', '/admin/login')
 
-  const get = (k: string) => String(formData.get(k) ?? '').trim()
-  const id = get('id')
-  const fields = [
-    'line1', 'line2', 'city', 'state', 'postalCode', 'country',
-    'bedrooms', 'bathrooms', 'squareFeet', 'lotSize', 'lat', 'lng',
-    'assessedValue', 'askingPrice', 'status', 'equityGenerated', 'tier', 'incomeRequirement',
-    'equitySharePercent', 'thumbnailUrl', 'galleryUrls',
-  ]
-  const values: Record<string, string> = {}
-  for (const f of fields) values[f] = get(f)
+  const id = String(formData.get('id') ?? '').trim()
+  const parsed = parsePropertyForm(formData, { admin: true })
+  if (!parsed.ok) return { errors: parsed.errors, values: parsed.values }
+  const { values, input, admin } = parsed
 
-  const errors: Record<string, string> = {}
-  if (!values.line1) errors.line1 = 'Enter the street address.'
-  if (!values.city) errors.city = 'Enter the city.'
-  if (!values.state) errors.state = 'Enter the state/region.'
-  if (!values.postalCode) errors.postalCode = 'Enter the postal code.'
-  if (!values.country) errors.country = 'Enter the country.'
+  const existing = await getPropertyById(id)
+  if (!existing) return { message: 'Property not found.', values }
 
-  const bedrooms = num(values.bedrooms)
-  const bathrooms = num(values.bathrooms)
-  const squareFeet = num(values.squareFeet)
-  const assessedValue = num(values.assessedValue)
-  const askingPrice = num(values.askingPrice)
-  if (bedrooms === null || bedrooms < 0) errors.bedrooms = 'Enter the number of rooms.'
-  if (bathrooms === null || bathrooms < 0) errors.bathrooms = 'Enter the number of bathrooms.'
-  if (squareFeet === null || squareFeet <= 0) errors.squareFeet = 'Enter the square footage.'
-  if (!values.lotSize) errors.lotSize = 'Enter the land/lot size.'
-  if (assessedValue === null || assessedValue < 0) errors.assessedValue = 'Enter the assessed value.'
-  if (askingPrice === null || askingPrice < 0) errors.askingPrice = 'Enter the asking price.'
-
-  const status = values.status as 'pending' | 'approved' | 'rejected'
-  if (!['pending', 'approved', 'rejected'].includes(status)) errors.status = 'Choose a valid status.'
-
-  const lat = num(values.lat)
-  const lng = num(values.lng)
-  if ((values.lat && lat === null) || (values.lng && lng === null)) errors.lat = 'Coordinates must be numbers.'
-
-  const equityGenerated = num(values.equityGenerated)
-  const tier = num(values.tier)
-  const incomeRequirement = num(values.incomeRequirement)
-  const equitySharePercent = num(values.equitySharePercent)
-  if (equitySharePercent !== null && (equitySharePercent < 0 || equitySharePercent > 100)) {
-    errors.equitySharePercent = 'Equity share must be between 0 and 100.'
-  }
-  if (status === 'approved') {
-    if (equityGenerated === null || equityGenerated < 0) {
-      errors.equityGenerated = 'Set the equity generated for an approved property.'
+  // Ownership transfer (property bought/sold). The new owner must be a real
+  // partner and the admin must explicitly confirm, because this moves where
+  // future rent equity accrues. Done first so a bad partner id changes nothing.
+  const newPartnerId = String(formData.get('partnerId') ?? '').trim()
+  const transferring = newPartnerId !== '' && newPartnerId !== existing.partnerId
+  if (transferring) {
+    if (formData.get('confirmTransfer') !== 'on') {
+      return { errors: { partnerId: 'Confirm the ownership transfer to continue.' }, values }
     }
-    if (tier === null || !Number.isInteger(tier) || tier < MIN_TIER || tier > MAX_TIER) {
-      errors.tier = 'Choose a housing tier.'
-    }
-    if (incomeRequirement === null || incomeRequirement < 0) {
-      errors.incomeRequirement = 'Set the monthly income requirement.'
+    if (!(await findPartnerById(newPartnerId))) {
+      return { errors: { partnerId: 'Choose an existing partner.' }, values }
     }
   }
-
-  let galleryUrls: string[] = []
-  if (values.galleryUrls) {
-    try {
-      const parsed = JSON.parse(values.galleryUrls)
-      if (Array.isArray(parsed)) galleryUrls = parsed.filter((u) => typeof u === 'string')
-    } catch {
-      /* ignore */
-    }
-  }
-
-  if (Object.keys(errors).length > 0) return { errors, values }
 
   const ok = await updateProperty(id, {
-    address: {
-      line1: values.line1,
-      line2: values.line2 || undefined,
-      city: values.city,
-      state: values.state,
-      postalCode: values.postalCode,
-      country: values.country,
-    },
-    bedrooms: bedrooms!,
-    bathrooms: bathrooms!,
-    squareFeet: squareFeet!,
-    lotSize: values.lotSize,
-    coordinates: lat !== null && lng !== null ? { lat, lng } : undefined,
-    thumbnailUrl: values.thumbnailUrl || undefined,
-    galleryUrls,
-    assessedValue: assessedValue!,
-    askingPrice: askingPrice!,
-    tier: tier ?? undefined,
-    incomeRequirement: incomeRequirement ?? undefined,
-    status,
-    equityGenerated: equityGenerated ?? undefined,
-    equitySharePercent: equitySharePercent ?? undefined,
+    ...input,
+    status: admin!.status,
+    equityGenerated: admin!.equityGenerated,
+    equitySharePercent: admin!.equitySharePercent,
   })
-
   if (!ok) return { message: 'Property not found.', values }
+
+  if (transferring && !(await transferProperty(id, existing.partnerId, newPartnerId))) {
+    return { message: 'Saved, but ownership changed elsewhere in the meantime — reload and try the transfer again.', values }
+  }
 
   // A changed equity share applies immediately to all accrued (unsent) equity,
   // not just future payments — reprice this property's ledger entries.
-  if (equitySharePercent !== null) {
-    await repricePropertyEquity(id, equitySharePercent)
+  if (admin!.equitySharePercent !== undefined) {
+    await repricePropertyEquity(id, admin!.equitySharePercent)
   }
 
   revalidatePath('/admin/properties')
