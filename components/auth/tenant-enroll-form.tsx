@@ -4,8 +4,7 @@ import { useActionState, useState } from 'react'
 import { Button, SoftButton, PlainButton } from '@/components/elements/button'
 import { enrollTenant, type TenantEnrollState } from '@/app/actions/tenants'
 
-const inputClass =
-  'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:placeholder:text-olive-400'
+import { inputClass } from '@/components/elements/input'
 
 function Field({
   label,
@@ -15,6 +14,7 @@ function Field({
   required = true,
   placeholder,
   autoComplete,
+  inputMode,
   className,
   lockedValue,
 }: {
@@ -25,6 +25,8 @@ function Field({
   required?: boolean
   placeholder?: string
   autoComplete?: string
+  /** Picks the right mobile keyboard (e.g. 'decimal' guarantees a numeric pad on iOS). */
+  inputMode?: 'none' | 'text' | 'tel' | 'url' | 'email' | 'numeric' | 'decimal' | 'search'
   className?: string
   /** Server-supplied value the applicant can't change (invited name/email). */
   lockedValue?: string
@@ -42,6 +44,7 @@ function Field({
         required={required}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        inputMode={inputMode}
         defaultValue={lockedValue ?? (type === 'password' ? undefined : state?.values?.[name])}
         readOnly={lockedValue !== undefined}
         aria-invalid={error ? true : undefined}
@@ -95,6 +98,7 @@ function PeopleEditor({
           </label>
           <PlainButton
             type="button"
+            size="lg"
             onClick={() => setPeople(people.filter((_, idx) => idx !== i))}
             className="text-red-600 dark:text-red-400"
           >
@@ -195,7 +199,7 @@ export function TenantEnrollForm({
           <Field label="Job title" name="jobTitle" state={state} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Monthly income (USD)" name="monthlyIncome" type="number" state={state} />
+          <Field label="Monthly income (USD)" name="monthlyIncome" type="number" inputMode="decimal" state={state} />
           <Field label="Employer phone" name="employerPhone" type="tel" state={state} required={false} />
         </div>
       </fieldset>
@@ -207,7 +211,7 @@ export function TenantEnrollForm({
       )}
 
       <div className="flex flex-col gap-2">
-        <Button type="submit" size="lg" disabled={pending} className="w-fit disabled:opacity-60">
+        <Button type="submit" size="lg" disabled={pending} className="w-full disabled:opacity-60 sm:w-fit">
           {pending ? (admin ? 'Creating…' : 'Starting…') : admin ? 'Create tenant account' : 'Continue to payment'}
         </Button>
         {admin ? (

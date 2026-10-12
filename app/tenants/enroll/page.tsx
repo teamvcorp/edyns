@@ -29,7 +29,8 @@ export default async function TenantEnrollPage({
   return (
     <section className="py-16 sm:py-20">
       <Container className="flex max-w-2xl flex-col">
-        <Card className="flex flex-col gap-6 p-8 sm:p-10">
+        {/* Lighter padding on phones: Container already spends 24px per side, so p-8 here left ~248px of form width on a 360px screen. */}
+        <Card className="flex flex-col gap-6 p-5 sm:p-10">
           <div className="flex flex-col gap-2">
             <Eyebrow>Tenants · The Effort Exchange</Eyebrow>
             <Subheading className="text-3xl/9">Apply to the program</Subheading>

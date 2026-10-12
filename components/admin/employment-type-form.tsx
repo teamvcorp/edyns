@@ -5,7 +5,8 @@ import { Button } from '@/components/elements/button'
 import { setTenantEmploymentTypeAction, type AdminActionState } from '@/app/actions/admin'
 
 const inputClass =
-  'w-32 rounded-lg bg-olive-950/5 px-3 py-1.5 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10'
+  // 16px on phones to avoid iOS focus-zoom — see components/elements/input.ts.
+  'w-32 rounded-lg bg-olive-950/5 px-3 py-1.5 text-base text-olive-950 outline-none ring-1 ring-olive-950/10 focus:ring-2 focus:ring-olive-950 sm:text-sm dark:bg-white/5 dark:text-white dark:ring-white/10'
 
 /** Admin override of a tenant's employment type (self-employed + claimed hourly rate). */
 export function EmploymentTypeForm({

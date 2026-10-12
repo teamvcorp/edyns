@@ -4,8 +4,7 @@ import { useActionState } from 'react'
 import { Button } from '@/components/elements/button'
 import { setPasswordAction, type SetPasswordState } from '@/app/actions/auth'
 
-const inputClass =
-  'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:placeholder:text-olive-400 dark:focus:ring-white'
+import { inputClass } from '@/components/elements/input'
 const labelClass = 'flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white'
 
 export function SetPasswordForm() {

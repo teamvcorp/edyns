@@ -4,8 +4,7 @@ import { useActionState } from 'react'
 import { Button } from '@/components/elements/button'
 import { startTenantBillingAction, type AdminActionState } from '@/app/actions/admin'
 
-const inputClass =
-  'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10'
+import { inputClass } from '@/components/elements/input'
 const labelClass = 'text-sm font-medium text-olive-950 dark:text-white'
 
 export function TenantBillingForm({

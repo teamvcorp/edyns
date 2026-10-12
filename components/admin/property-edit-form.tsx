@@ -8,8 +8,7 @@ import { createPropertyByAdmin } from '@/app/actions/admin-create'
 import { TIERS } from '@/lib/tiers'
 import type { Property } from '@/lib/properties'
 
-const inputClass =
-  'w-full rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10'
+import { inputClass } from '@/components/elements/input'
 
 function Field({
   label,

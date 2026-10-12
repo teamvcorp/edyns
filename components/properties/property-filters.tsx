@@ -3,8 +3,7 @@ import { Link } from '@/components/elements/link'
 import { InformationCircleIcon } from '@/components/icons/information-circle-icon'
 import { TIERS } from '@/lib/tiers'
 
-const inputClass =
-  'rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 placeholder:text-olive-500 focus:ring-2 focus:ring-olive-950 dark:bg-white/5 dark:text-white dark:ring-white/10 dark:placeholder:text-olive-400'
+import { inputClassInline as inputClass } from '@/components/elements/input'
 
 /** GET form so filters live in the URL (works with the dynamic /properties page). */
 export function PropertyFilters({ zip, tier }: { zip?: string; tier?: string }) {

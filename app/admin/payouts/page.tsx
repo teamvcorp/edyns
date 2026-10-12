@@ -11,8 +11,7 @@ import { formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Payout requests' }
 
-const inputClass =
-  'rounded-lg bg-olive-950/5 px-3 py-2 text-sm text-olive-950 outline-none ring-1 ring-olive-950/10 dark:bg-white/5 dark:text-white dark:ring-white/10'
+import { inputClassInline as inputClass } from '@/components/elements/input'
 
 const statusLabel = { requested: 'Pending', paid: 'Paid', declined: 'Declined' } as const
 
