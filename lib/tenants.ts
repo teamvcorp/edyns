@@ -423,6 +423,34 @@ export async function setVerifiedIncome(
   await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: set })
 }
 
+/**
+ * Admin manually verifies income (reviewed paystub, employer call, …) and
+ * records the confirmed figures — the same fields Plaid verification sets, so
+ * rent setup, the 40% suggestion, and the 35-hour check all work unchanged.
+ * Distinguishable from Plaid via verificationMethod: 'manual'.
+ */
+export async function setVerifiedIncomeManually(
+  tenantId: string,
+  input: { monthlyIncome: number; weeklyHours: number },
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    {
+      $set: {
+        'employment.verified': true,
+        'employment.verificationMethod': 'manual',
+        'employment.verifiedAt': new Date(),
+        'employment.verifiedMonthlyIncome': input.monthlyIncome,
+        'employment.verifiedWeeklyHours': input.weeklyHours,
+        updatedAt: new Date(),
+      },
+    },
+  )
+  return res.matchedCount === 1
+}
+
 export async function setBilling(userId: string, billing: Billing): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne({ userId: new ObjectId(userId) }, { $set: { billing, updatedAt: new Date() } })

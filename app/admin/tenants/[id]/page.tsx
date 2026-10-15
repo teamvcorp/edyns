@@ -12,6 +12,7 @@ import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
+import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
 import {
   resumeTenantBillingAction,
   replaceImportedWithBillingAction,
@@ -222,7 +223,9 @@ export default async function AdminTenantReviewPage({
               label="Income verification"
               value={
                 t.employment.verified
-                  ? 'Verified via Plaid'
+                  ? t.employment.verificationMethod === 'manual'
+                    ? 'Verified manually by admin'
+                    : 'Verified via Plaid'
                   : t.paystub
                     ? 'Paystub uploaded'
                     : 'Not yet verified'
@@ -278,6 +281,13 @@ export default async function AdminTenantReviewPage({
             selfEmployed={Boolean(t.employment.selfEmployed)}
             hourlyRate={t.employment.claimedHourlyRate}
           />
+          {!t.employment.verified && (
+            <IncomeVerifyForm
+              tenantId={t.id}
+              requiredWeeklyHours={REQUIRED_WEEKLY_HOURS}
+              reportedMonthlyIncome={t.employment.monthlyIncome}
+            />
+          )}
         </Card>
 
         <Card className="flex flex-col gap-4">
@@ -419,7 +429,7 @@ export default async function AdminTenantReviewPage({
                 <p className="text-sm text-olive-600 dark:text-olive-500">
                   Income on file{' '}
                   {t.employment.verified
-                    ? `(Plaid${t.employment.verifiedMonthlyIncome ? ` · ${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo verified` : ''})`
+                    ? `(${t.employment.verificationMethod === 'manual' ? 'verified manually' : 'Plaid'}${t.employment.verifiedMonthlyIncome ? ` · ${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo verified` : ''})`
                     : '(paystub uploaded — review it above)'}
                   . Enter the recurring 40% amount, frequency, and first draft date.
                 </p>

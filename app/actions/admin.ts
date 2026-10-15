@@ -31,6 +31,7 @@ import {
   resetVerification,
   markIdentityVerifiedManually,
   markFeeCollectedOffline,
+  setVerifiedIncomeManually,
   type BillingFrequency,
 } from '@/lib/tenants'
 import { removePlaidItem } from '@/lib/plaid'
@@ -373,6 +374,40 @@ export async function markIdentityVerifiedManuallyAction(formData: FormData): Pr
   revalidatePath(back)
   revalidatePath('/tenants')
   redirect(`${back}?override=identity`)
+}
+
+/**
+ * Admin manually approves income after reviewing evidence themselves (uploaded
+ * paystub, employer call). Records verified gross monthly income + weekly hours —
+ * the same fields Plaid sets — so rent setup and the 35-hour check work as usual.
+ */
+export async function approveTenantIncomeAction(
+  _prev: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '').trim()
+  const monthlyIncome = Number(String(formData.get('monthlyIncome') ?? '').trim())
+  const weeklyHours = Number(String(formData.get('weeklyHours') ?? '').trim())
+
+  if (!id) return { error: 'Missing tenant id.' }
+  if (formData.get('confirm') !== 'on') {
+    return { error: 'Confirm you reviewed the income evidence before approving.' }
+  }
+  if (!Number.isFinite(monthlyIncome) || monthlyIncome <= 0) {
+    return { error: 'Enter the verified gross monthly income.' }
+  }
+  if (!Number.isFinite(weeklyHours) || weeklyHours <= 0 || weeklyHours > 100) {
+    return { error: 'Enter the verified weekly hours (1–100).' }
+  }
+
+  const ok = await setVerifiedIncomeManually(id, { monthlyIncome, weeklyHours })
+  if (!ok) return { error: 'Tenant not found.' }
+
+  revalidatePath('/admin/tenants')
+  revalidatePath(`/admin/tenants/${id}`)
+  revalidatePath('/tenants')
+  return undefined
 }
 
 /** Mark the $25 application fee as collected outside the app (cash / Stripe-side). */

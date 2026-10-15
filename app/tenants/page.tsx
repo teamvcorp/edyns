@@ -189,7 +189,9 @@ export default async function TenantPortalPage({
           <>
             <Text className="text-sm/6">
               <p>
-                Bank connected via Plaid.{' '}
+                {tenant.employment.verificationMethod === 'manual'
+                  ? 'Your income was verified by our team.'
+                  : 'Bank connected via Plaid.'}{' '}
                 {verifiedIncome ? `Verified income ${formatCurrency(verifiedIncome)}/mo.` : 'Income estimate pending.'}
                 {verifiedHours != null ? ` Confirmed ${verifiedHours} hrs/week.` : ''}
               </p>
