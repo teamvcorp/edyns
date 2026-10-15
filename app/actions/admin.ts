@@ -29,6 +29,8 @@ import {
   setEmploymentTypeById,
   resumeBilling,
   resetVerification,
+  markIdentityVerifiedManually,
+  markFeeCollectedOffline,
   type BillingFrequency,
 } from '@/lib/tenants'
 import { removePlaidItem } from '@/lib/plaid'
@@ -350,6 +352,41 @@ export async function resendWelcomeEmailAction(formData: FormData): Promise<void
     sent = false
   }
   redirect(`${dest}?welcome=${sent ? 'sent' : 'failed'}`)
+}
+
+// ---- Manual overrides (paper / Stripe-imported tenants) ----
+
+/**
+ * Admin attests they checked the tenant's government ID themselves (in person /
+ * paper application), bypassing Stripe Identity. Requires an explicit confirm
+ * because it bypasses the automated fraud check; recorded as identityManual so
+ * it stays distinguishable from a Stripe-verified ID.
+ */
+export async function markIdentityVerifiedManuallyAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '').trim()
+  const back = `/admin/tenants/${id}`
+  if (formData.get('confirm') !== 'on') redirect(`${back}?override=confirm`)
+
+  await markIdentityVerifiedManually(id)
+  revalidatePath('/admin/tenants')
+  revalidatePath(back)
+  revalidatePath('/tenants')
+  redirect(`${back}?override=identity`)
+}
+
+/** Mark the $25 application fee as collected outside the app (cash / Stripe-side). */
+export async function markFeeCollectedOfflineAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '').trim()
+  const back = `/admin/tenants/${id}`
+  if (formData.get('confirm') !== 'on') redirect(`${back}?override=confirm`)
+
+  await markFeeCollectedOffline(id)
+  revalidatePath('/admin/tenants')
+  revalidatePath(back)
+  revalidatePath('/tenants')
+  redirect(`${back}?override=fee`)
 }
 
 // ---- Verification reset (stuck applicants) ----

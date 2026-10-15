@@ -256,10 +256,14 @@ export default async function TenantPortalPage({
         </div>
         {tenant.identityVerified ? (
           <Text className="text-sm/6">
-            <p>
-              Your government ID is verified{tenant.idNumberLast4 ? ` (•••• ${tenant.idNumberLast4})` : ''}. Your full ID
-              is stored securely by Stripe — never by edynsgate.
-            </p>
+            {tenant.identityManual ? (
+              <p>Your government ID was verified by our team.</p>
+            ) : (
+              <p>
+                Your government ID is verified{tenant.idNumberLast4 ? ` (•••• ${tenant.idNumberLast4})` : ''}. Your full
+                ID is stored securely by Stripe — never by edynsgate.
+              </p>
+            )}
           </Text>
         ) : (
           <>

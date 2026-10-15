@@ -79,6 +79,8 @@ export interface TenantDoc {
     stripeSessionId?: string
     paymentIntentId?: string
     paidAt?: Date
+    /** True when the fee was collected outside the app (cash / Stripe-side) and an admin marked it paid. */
+    offline?: boolean
   }
   stripeCustomerId?: string
   defaultPaymentMethodId?: string
@@ -92,6 +94,8 @@ export interface TenantDoc {
   stripeIdentitySessionId?: string
   identityVerified?: boolean
   identityVerifiedAt?: Date
+  /** True when an admin attested the ID in person instead of Stripe Identity (paper/imported tenants). */
+  identityManual?: boolean
   idNumberLast4?: string
   /** Manually uploaded paystub — alternative to Plaid for income verification. */
   paystub?: { url: string; uploadedAt: Date }
@@ -133,6 +137,7 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
   await col.createIndex({ status: 1 })
   await col.createIndex({ 'fee.stripeSessionId': 1 })
   await col.createIndex({ 'billing.stripeSubscriptionId': 1 })
+  await col.createIndex({ stripeCustomerId: 1 })
   await col.createIndex({ plaidItemId: 1 })
   await col.createIndex({ plaidUserId: 1 })
   return col
@@ -231,9 +236,24 @@ export async function isPropertyRented(propertyId: string): Promise<boolean> {
   return doc !== null
 }
 
-export async function attachStripeCustomer(userId: string, customerId: string): Promise<void> {
+export async function attachStripeCustomer(
+  userId: string,
+  customerId: string,
+  defaultPaymentMethodId?: string,
+): Promise<void> {
   const col = await tenantsCollection()
-  await col.updateOne({ userId: new ObjectId(userId) }, { $set: { stripeCustomerId: customerId, updatedAt: new Date() } })
+  const set: Record<string, unknown> = { stripeCustomerId: customerId, updatedAt: new Date() }
+  // Imported customers bring their saved payment method, so rent can draft
+  // without the in-app fee checkout (which is what normally saves the method).
+  if (defaultPaymentMethodId) set.defaultPaymentMethodId = defaultPaymentMethodId
+  await col.updateOne({ userId: new ObjectId(userId) }, { $set: set })
+}
+
+/** Find the tenant already linked to a Stripe customer (guards double-linking on import). */
+export async function getTenantByStripeCustomer(customerId: string): Promise<Tenant | null> {
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ stripeCustomerId: customerId })
+  return doc ? toTenant(doc) : null
 }
 
 export async function setFeeSession(userId: string, sessionId: string): Promise<void> {
@@ -510,6 +530,36 @@ export async function markIdentityVerified(opts: {
 // ---- Admin ----
 
 /**
+ * Admin attestation that they verified the tenant's government ID themselves
+ * (in person / from a paper application) instead of via Stripe Identity. Kept
+ * distinguishable with `identityManual` for the audit trail. Unblocks approval.
+ */
+export async function markIdentityVerifiedManually(tenantId: string): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), identityVerified: { $ne: true } },
+    { $set: { identityVerified: true, identityManual: true, identityVerifiedAt: new Date(), updatedAt: new Date() } },
+  )
+  return res.matchedCount === 1
+}
+
+/**
+ * Mark the application fee as collected outside the app (cash, or already paid
+ * on the Stripe side for imported tenants). Never downgrades a real payment —
+ * only applies while the fee isn't already paid. Unblocks approval.
+ */
+export async function markFeeCollectedOffline(tenantId: string): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'fee.status': { $ne: 'paid' } },
+    { $set: { 'fee.status': 'paid', 'fee.offline': true, 'fee.paidAt': new Date(), updatedAt: new Date() } },
+  )
+  return res.matchedCount === 1
+}
+
+/**
  * Admin reset for stuck applicants: wipe ALL verification progress — Plaid
  * (tokens, item, link counter), income results, Stripe Identity, paystub, and
  * security flags — so the tenant can re-enter info and run verification fresh.
@@ -544,6 +594,7 @@ export async function resetVerification(tenantId: string): Promise<boolean> {
         stripeIdentitySessionId: '',
         identityVerified: '',
         identityVerifiedAt: '',
+        identityManual: '',
         idNumberLast4: '',
         paystub: '',
         flaggedForReview: '',

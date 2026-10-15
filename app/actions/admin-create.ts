@@ -6,8 +6,14 @@ import { createUser, isEmailTaken, registerPartner, findPartnerById } from '@/li
 import { createPropertyAsAdmin } from '@/lib/properties'
 import { parsePropertyForm } from '@/lib/property-input'
 import { revalidatePath } from 'next/cache'
-import { createTenantApplication, type Person } from '@/lib/tenants'
-import { applicationTotalCents } from '@/lib/stripe'
+import {
+  createTenantApplication,
+  attachStripeCustomer,
+  getTenantByStripeCustomer,
+  markFeeCollectedOffline,
+  type Person,
+} from '@/lib/tenants'
+import { applicationTotalCents, fetchCustomerForImport, type ImportedCustomer } from '@/lib/stripe'
 import { sendCredentialsEmail } from '@/lib/email'
 import type { TenantEnrollState } from '@/app/actions/tenants'
 import type { EnrollState } from '@/app/actions/partners'
@@ -35,7 +41,52 @@ function parsePeople(json: string): Person[] {
   }
 }
 
-/** Admin creates a tenant from a paper application; temp password is emailed. */
+// ---- Prefill from an existing Stripe customer ----
+
+export type CustomerLookupState =
+  | { customerId: string; values: Record<string, string>; paymentMethodLabel: string | null }
+  | { error: string }
+  | undefined
+
+/**
+ * Look up a Stripe customer so the add-tenant form can be prefilled with their
+ * demographics (name, email, phone, address) and show the saved payment method.
+ * Read-only — nothing is linked until the application is actually created.
+ */
+export async function lookupStripeCustomerAction(
+  _prev: CustomerLookupState,
+  formData: FormData,
+): Promise<CustomerLookupState> {
+  await requireRole('admin', '/admin/login')
+  const customerId = String(formData.get('customerId') ?? '').trim()
+  if (!customerId) return { error: 'Paste the Stripe customer id.' }
+
+  const result = await fetchCustomerForImport(customerId)
+  if (!result.ok) return { error: result.error }
+
+  const existing = await getTenantByStripeCustomer(result.data.customerId)
+  if (existing) return { error: `That Stripe customer is already linked to ${existing.name}.` }
+
+  const c = result.data
+  const values: Record<string, string> = {
+    name: c.name ?? '',
+    email: c.email ?? '',
+    phone: c.phone ?? '',
+    line1: c.address?.line1 ?? '',
+    line2: c.address?.line2 ?? '',
+    city: c.address?.city ?? '',
+    state: c.address?.state ?? '',
+    postalCode: c.address?.postalCode ?? '',
+    // Stripe stores ISO codes; expand the common one for the free-text field.
+    country: c.address?.country === 'US' ? 'United States' : c.address?.country ?? '',
+  }
+  return { customerId: c.customerId, values, paymentMethodLabel: c.paymentMethodLabel }
+}
+
+/** Admin creates a tenant from a paper application; temp password is emailed.
+ *  Optionally linked to an existing Stripe customer (re-verified server-side),
+ *  importing their saved payment method so rent can draft without the in-app
+ *  fee checkout. */
 export async function createTenantByAdmin(_prev: TenantEnrollState, formData: FormData): Promise<TenantEnrollState> {
   await requireRole('admin', '/admin/login')
   const get = (k: string) => String(formData.get(k) ?? '').trim()
@@ -71,8 +122,21 @@ export async function createTenantByAdmin(_prev: TenantEnrollState, formData: Fo
     return { errors: { email: 'A tenant with this email already exists.' }, values }
   }
 
+  // Linking an existing Stripe customer: the posted id is untrusted, so
+  // re-fetch it from Stripe and re-check it isn't linked to another tenant.
+  const stripeCustomerId = get('stripeCustomerId')
+  let imported: ImportedCustomer | null = null
+  if (stripeCustomerId) {
+    const result = await fetchCustomerForImport(stripeCustomerId)
+    if (!result.ok) return { message: result.error, values }
+    if (await getTenantByStripeCustomer(result.data.customerId)) {
+      return { message: 'That Stripe customer is already linked to another tenant.', values }
+    }
+    imported = result.data
+  }
+
   const user = await createUser({ email: values.email, name: values.name, password, role: 'tenant' })
-  await createTenantApplication(user.id, {
+  const tenant = await createTenantApplication(user.id, {
     name: values.name,
     email: values.email,
     phone: values.phone,
@@ -95,6 +159,14 @@ export async function createTenantByAdmin(_prev: TenantEnrollState, formData: Fo
     },
     feeAmountCents: applicationTotalCents(),
   })
+
+  if (imported) {
+    await attachStripeCustomer(user.id, imported.customerId, imported.defaultPaymentMethodId ?? undefined)
+  }
+  // Admin attests the $25 fee was collected outside the app (cash / Stripe-side).
+  if (formData.get('feeCollected') === 'on') {
+    await markFeeCollectedOffline(tenant.id)
+  }
 
   let emailed = true
   try {

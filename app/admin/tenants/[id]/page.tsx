@@ -17,6 +17,8 @@ import {
   replaceImportedWithBillingAction,
   resendWelcomeEmailAction,
   resetTenantVerificationAction,
+  markIdentityVerifiedManuallyAction,
+  markFeeCollectedOfflineAction,
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
@@ -43,6 +45,12 @@ const welcomeCopy: Record<string, string> = {
   notfound: 'Could not find that user account.',
 }
 
+const overrideCopy: Record<string, { ok: boolean; text: string }> = {
+  identity: { ok: true, text: 'Identity marked as verified manually.' },
+  fee: { ok: true, text: 'Application fee marked as collected offline.' },
+  confirm: { ok: false, text: 'Check the confirmation box to apply the override.' },
+}
+
 const resetCopy: Record<string, { ok: boolean; text: string }> = {
   done: { ok: true, text: 'Verification progress was reset — the tenant was emailed to start the flow again.' },
   confirm: { ok: false, text: 'Check the confirmation box to reset verification.' },
@@ -57,11 +65,11 @@ export default async function AdminTenantReviewPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ welcome?: string; reset?: string }>
+  searchParams: Promise<{ welcome?: string; reset?: string; override?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { welcome, reset } = await searchParams
+  const { welcome, reset, override } = await searchParams
   const t = await getTenantById(id)
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
@@ -99,6 +107,19 @@ export default async function AdminTenantReviewPage({
             }
           >
             {welcomeCopy[welcome]}
+          </p>
+        )}
+
+        {override && overrideCopy[override] && (
+          <p
+            role="status"
+            className={
+              overrideCopy[override].ok
+                ? 'text-sm text-olive-700 dark:text-olive-300'
+                : 'text-sm text-red-600 dark:text-red-400'
+            }
+          >
+            {overrideCopy[override].text}
           </p>
         )}
 
@@ -263,7 +284,10 @@ export default async function AdminTenantReviewPage({
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Application</h3>
           <dl className="grid gap-4 sm:grid-cols-3">
             <Row label="Status" value={statusLabel[t.status]} />
-            <Row label="Fee" value={`${feeLabel[t.fee.status]} · ${formatCurrency(t.fee.amountCents / 100)}`} />
+            <Row
+              label="Fee"
+              value={`${feeLabel[t.fee.status]}${t.fee.offline ? ' (offline)' : ''} · ${formatCurrency(t.fee.amountCents / 100)}`}
+            />
             <Row label="Payment method" value={t.defaultPaymentMethodId ? 'On file' : '—'} />
             <Row
               label="Rent collection"
@@ -275,13 +299,56 @@ export default async function AdminTenantReviewPage({
             />
             <Row
               label="Identity (ID + selfie)"
-              value={t.identityVerified ? `Verified${t.idNumberLast4 ? ` · •••• ${t.idNumberLast4}` : ''}` : 'Not verified'}
+              value={
+                t.identityVerified
+                  ? t.identityManual
+                    ? 'Verified manually by admin'
+                    : `Verified${t.idNumberLast4 ? ` · •••• ${t.idNumberLast4}` : ''}`
+                  : 'Not verified'
+              }
             />
           </dl>
           {t.status === 'rejected' && t.rejectionReason && (
             <p className="text-sm text-red-600 dark:text-red-400">Reason: {t.rejectionReason}</p>
           )}
         </Card>
+
+        {(!t.identityVerified || t.fee.status !== 'paid') && (
+          <Card className="flex flex-col gap-4">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Manual overrides</h3>
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              For paper applications and tenants imported from Stripe: approval normally requires Stripe Identity (ID +
+              selfie) and the in-app fee payment. If you verified these yourself, record that here to unblock approval.
+            </p>
+            {!t.identityVerified && (
+              <form action={markIdentityVerifiedManuallyAction} className="flex flex-col gap-2">
+                <input type="hidden" name="id" value={t.id} />
+                <label className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-olive-950 ring-1 ring-amber-500/30 dark:text-white">
+                  <input type="checkbox" name="confirm" className="mt-1" />
+                  <span>
+                    I personally checked this tenant’s government ID and it matches the application. This bypasses the
+                    automated Stripe Identity check.
+                  </span>
+                </label>
+                <SoftButton type="submit" className="w-fit">
+                  Mark identity verified manually
+                </SoftButton>
+              </form>
+            )}
+            {t.fee.status !== 'paid' && (
+              <form action={markFeeCollectedOfflineAction} className="flex flex-col gap-2">
+                <input type="hidden" name="id" value={t.id} />
+                <label className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-olive-950 ring-1 ring-amber-500/30 dark:text-white">
+                  <input type="checkbox" name="confirm" className="mt-1" />
+                  <span>The $25 application fee was collected outside the app (cash or directly in Stripe).</span>
+                </label>
+                <SoftButton type="submit" className="w-fit">
+                  Mark fee collected offline
+                </SoftButton>
+              </form>
+            )}
+          </Card>
+        )}
 
         {t.status === 'pending' && (
           <Card className="flex flex-col gap-4">

@@ -46,6 +46,84 @@ export function applicationTotalCents(): number {
   return withProcessingFee(APPLICATION_FEE_CENTS)
 }
 
+// ---- Importing an existing Stripe customer (admin add-tenant prefill) ----
+
+/** Normalized view of a Stripe customer: demographics + their saved payment method. */
+export type ImportedCustomer = {
+  customerId: string
+  name: string | null
+  email: string | null
+  phone: string | null
+  address: { line1: string; line2: string; city: string; state: string; postalCode: string; country: string } | null
+  defaultPaymentMethodId: string | null
+  /** Human label for admin confidence, e.g. "visa •••• 4242" or "bank •••• 6789". */
+  paymentMethodLabel: string | null
+}
+
+export type CustomerImportResult = { ok: true; data: ImportedCustomer } | { ok: false; error: string }
+
+/**
+ * Look up an existing Stripe customer by id and normalize it for the admin
+ * add-tenant flow: demographics to prefill the application, plus the saved
+ * payment method (their invoice default, else the most recently attached) so
+ * rent can draft without the in-app fee checkout. Read-only.
+ */
+export async function fetchCustomerForImport(customerId: string): Promise<CustomerImportResult> {
+  const id = customerId.trim()
+  if (!id.startsWith('cus_')) return { ok: false, error: 'Enter a Stripe customer id (it starts with “cus_”).' }
+
+  let customer: Stripe.Customer | Stripe.DeletedCustomer
+  try {
+    customer = await getStripe().customers.retrieve(id, { expand: ['invoice_settings.default_payment_method'] })
+  } catch {
+    return { ok: false, error: 'No Stripe customer found for that id.' }
+  }
+  if (customer.deleted) return { ok: false, error: 'That Stripe customer was deleted in Stripe.' }
+
+  let pm: Stripe.PaymentMethod | null =
+    typeof customer.invoice_settings?.default_payment_method === 'object'
+      ? customer.invoice_settings.default_payment_method
+      : null
+  if (!pm) {
+    try {
+      const list = await getStripe().customers.listPaymentMethods(id, { limit: 1 })
+      pm = list.data[0] ?? null
+    } catch {
+      pm = null
+    }
+  }
+  const paymentMethodLabel = pm
+    ? pm.card
+      ? `${pm.card.brand} •••• ${pm.card.last4}`
+      : pm.us_bank_account
+        ? `bank •••• ${pm.us_bank_account.last4}`
+        : pm.type
+    : null
+
+  const a = customer.address
+  return {
+    ok: true,
+    data: {
+      customerId: customer.id,
+      name: customer.name ?? null,
+      email: customer.email ?? null,
+      phone: customer.phone ?? null,
+      address: a
+        ? {
+            line1: a.line1 ?? '',
+            line2: a.line2 ?? '',
+            city: a.city ?? '',
+            state: a.state ?? '',
+            postalCode: a.postal_code ?? '',
+            country: a.country ?? '',
+          }
+        : null,
+      defaultPaymentMethodId: pm?.id ?? null,
+      paymentMethodLabel,
+    },
+  }
+}
+
 // ---- Importing manually-created subscriptions (one-off tenants) ----
 
 /** Normalized view of an existing Stripe subscription, ready to record as billing. */

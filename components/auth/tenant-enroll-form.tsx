@@ -119,16 +119,26 @@ export function TenantEnrollForm({
   action = enrollTenant,
   mode = 'self',
   invite,
+  initialValues,
+  stripeCustomer,
 }: {
   action?: TenantAction
   mode?: 'self' | 'admin'
   /** Present when the applicant arrived via an emailed invite link. */
   invite?: { token: string; name: string; email: string }
+  /** Admin prefill (e.g. demographics pulled from a Stripe customer). Inputs are
+   *  uncontrolled, so remount the form (key) when these change after mount. */
+  initialValues?: Record<string, string>
+  /** Admin: link this existing Stripe customer (and their saved payment method). */
+  stripeCustomer?: { id: string; paymentMethodLabel: string | null }
 }) {
   const [state, formAction, pending] = useActionState(action, undefined)
   const [adults, setAdults] = useState<Person[]>([])
   const [children, setChildren] = useState<Person[]>([])
   const admin = mode === 'admin'
+  // Fields repopulate from state.values after a validation error; before the
+  // first submit, fall back to the prefill by presenting it as initial state.
+  const fieldState = state ?? (initialValues ? { values: initialValues } : undefined)
 
   const cleanAdults = adults.filter((p) => p.name.trim() && p.dob)
   const cleanChildren = children.filter((p) => p.name.trim() && p.dob)
@@ -138,21 +148,22 @@ export function TenantEnrollForm({
       <input type="hidden" name="adults" value={JSON.stringify(cleanAdults)} />
       <input type="hidden" name="children" value={JSON.stringify(cleanChildren)} />
       {invite && <input type="hidden" name="inviteToken" value={invite.token} />}
+      {admin && stripeCustomer && <input type="hidden" name="stripeCustomerId" value={stripeCustomer.id} />}
 
       <fieldset className="flex flex-col gap-4">
         <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Head of household</legend>
-        <Field label="Full name" name="name" state={state} autoComplete="name" lockedValue={invite?.name} />
+        <Field label="Full name" name="name" state={fieldState} autoComplete="name" lockedValue={invite?.name} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Email" name="email" type="email" state={state} autoComplete="email" lockedValue={invite?.email} />
-          <Field label="Phone" name="phone" type="tel" state={state} autoComplete="tel" />
+          <Field label="Email" name="email" type="email" state={fieldState} autoComplete="email" lockedValue={invite?.email} />
+          <Field label="Phone" name="phone" type="tel" state={fieldState} autoComplete="tel" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Date of birth" name="dob" type="date" state={state} />
+          <Field label="Date of birth" name="dob" type="date" state={fieldState} />
           <Field
             label={admin ? 'Temporary password' : 'Password'}
             name="password"
             type={admin ? 'text' : 'password'}
-            state={state}
+            state={fieldState}
             autoComplete="new-password"
             placeholder="At least 8 characters"
           />
@@ -161,15 +172,15 @@ export function TenantEnrollForm({
 
       <fieldset className="flex flex-col gap-4">
         <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Current address</legend>
-        <Field label="Street address" name="line1" state={state} autoComplete="address-line1" />
-        <Field label="Apartment, suite, etc." name="line2" state={state} required={false} autoComplete="address-line2" />
+        <Field label="Street address" name="line1" state={fieldState} autoComplete="address-line1" />
+        <Field label="Apartment, suite, etc." name="line2" state={fieldState} required={false} autoComplete="address-line2" />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="City" name="city" state={state} autoComplete="address-level2" />
-          <Field label="State / region" name="state" state={state} autoComplete="address-level1" />
+          <Field label="City" name="city" state={fieldState} autoComplete="address-level2" />
+          <Field label="State / region" name="state" state={fieldState} autoComplete="address-level1" />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Postal code" name="postalCode" state={state} autoComplete="postal-code" />
-          <Field label="Country" name="country" state={state} autoComplete="country-name" placeholder="United States" />
+          <Field label="Postal code" name="postalCode" state={fieldState} autoComplete="postal-code" />
+          <Field label="Country" name="country" state={fieldState} autoComplete="country-name" placeholder="United States" />
         </div>
       </fieldset>
 
@@ -195,14 +206,40 @@ export function TenantEnrollForm({
           We’ll verify employment and income through Plaid in a later step.
         </p>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Employer" name="employer" state={state} />
-          <Field label="Job title" name="jobTitle" state={state} />
+          <Field label="Employer" name="employer" state={fieldState} />
+          <Field label="Job title" name="jobTitle" state={fieldState} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Monthly income (USD)" name="monthlyIncome" type="number" inputMode="decimal" state={state} />
-          <Field label="Employer phone" name="employerPhone" type="tel" state={state} required={false} />
+          <Field label="Monthly income (USD)" name="monthlyIncome" type="number" inputMode="decimal" state={fieldState} />
+          <Field label="Employer phone" name="employerPhone" type="tel" state={fieldState} required={false} />
         </div>
       </fieldset>
+
+      {admin && (
+        <fieldset className="flex flex-col gap-3">
+          <legend className="mb-1 text-sm font-semibold text-olive-700 dark:text-olive-400">Payment & fee</legend>
+          {stripeCustomer ? (
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              Linked to Stripe customer <code className="text-olive-950 dark:text-white">{stripeCustomer.id}</code>
+              {stripeCustomer.paymentMethodLabel
+                ? ` — saved payment method (${stripeCustomer.paymentMethodLabel}) will be imported for rent drafts.`
+                : ' — no saved payment method found; one is still needed (fee checkout, or add it in Stripe) before rent can draft.'}
+            </p>
+          ) : (
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              No Stripe customer linked — one is created when the tenant pays the fee in the app. To link an existing
+              customer, use “Prefill from Stripe” above.
+            </p>
+          )}
+          <label className="flex items-start gap-2 text-sm text-olive-950 dark:text-white">
+            <input type="checkbox" name="feeCollected" className="mt-1" />
+            <span>
+              The $25 application fee was already collected outside the app (cash or directly in Stripe) — mark it paid
+              and skip the in-app fee checkout.
+            </span>
+          </label>
+        </fieldset>
+      )}
 
       {state?.message && (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
@@ -217,7 +254,8 @@ export function TenantEnrollForm({
         {admin ? (
           <p className="text-sm text-olive-600 dark:text-olive-500">
             The tenant will be emailed their temporary password and a sign-in link. Their first step is to sign in and
-            pay the <strong>$25 application fee</strong>. The application stays pending until paid and approved.
+            pay the <strong>$25 application fee</strong> (unless marked collected above). The application stays pending
+            until paid and approved.
           </p>
         ) : (
           <>

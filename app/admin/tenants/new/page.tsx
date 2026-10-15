@@ -6,8 +6,7 @@ import { Eyebrow } from '@/components/elements/eyebrow'
 import { Subheading } from '@/components/elements/subheading'
 import { Text } from '@/components/elements/text'
 import { Breadcrumbs } from '@/components/elements/breadcrumbs'
-import { TenantEnrollForm } from '@/components/auth/tenant-enroll-form'
-import { createTenantByAdmin } from '@/app/actions/admin-create'
+import { AdminTenantCreateForm } from '@/components/admin/tenant-create-form'
 
 export const metadata: Metadata = { title: 'Add tenant' }
 
@@ -30,14 +29,15 @@ export default async function AdminNewTenantPage() {
           <Subheading className="text-3xl/9 sm:text-4xl/12">Add a tenant</Subheading>
           <Text className="text-pretty">
             <p>
-              Enter a paper application. Set a temporary password — the tenant is emailed their credentials and signs in
-              to pay the $25 application fee.
+              Enter a paper application, or prefill it from an existing Stripe customer (demographics + saved payment
+              method). Set a temporary password — the tenant is emailed their credentials and signs in to pay the $25
+              application fee, unless you mark it already collected.
             </p>
           </Text>
         </div>
 
         <Card className="p-8 sm:p-10">
-          <TenantEnrollForm action={createTenantByAdmin} mode="admin" />
+          <AdminTenantCreateForm />
         </Card>
       </Container>
     </section>
