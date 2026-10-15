@@ -12,8 +12,6 @@ import { ButtonLink } from '@/components/elements/button'
 
 export const metadata: Metadata = { title: 'Admin' }
 
-const comingSoon = [{ title: 'Settings', body: 'Configure platform-wide settings and integrations.' }]
-
 export default async function AdminPage() {
   await requireRole('admin', '/admin/login')
   const [properties, tenants, requests, payouts, invoices] = await Promise.all([
@@ -133,17 +131,6 @@ export default async function AdminPage() {
         </div>
       </Card>
 
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        {comingSoon.map((c) => (
-          <Card key={c.title} className="flex flex-col gap-2">
-            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">{c.title}</h3>
-            <Text className="text-sm/6">
-              <p>{c.body}</p>
-            </Text>
-            <span className="mt-2 text-sm font-medium text-olive-600 dark:text-olive-500">Coming soon</span>
-          </Card>
-        ))}
-      </div>
     </PortalShell>
   )
 }
