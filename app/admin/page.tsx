@@ -28,6 +28,10 @@ export default async function AdminPage() {
   const pendingMoveIns = requests.filter((r) => r.status === 'requested').length
   const pendingPayouts = payouts.filter((p) => p.status === 'requested').length
   const openInvoices = invoices.filter((i) => i.status === 'sent' || i.status === 'accepted').length
+  const activeRent = tenants.filter((t) => t.billing?.status === 'active').length
+  const rentAttention = tenants.filter(
+    (t) => t.billing?.status === 'past_due' || t.billing?.status === 'paused',
+  ).length
 
   return (
     <PortalShell eyebrow="Administration" title="Admin dashboard">
@@ -70,6 +74,22 @@ export default async function AdminPage() {
             </Text>
           </div>
           <ButtonLink href="/admin/move-ins">Review move-ins</ButtonLink>
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent & revenue</h3>
+            <Text className="text-sm/6">
+              <p>
+                {activeRent} active rent subscription{activeRent === 1 ? '' : 's'}
+                {rentAttention > 0 ? `, ${rentAttention} need${rentAttention === 1 ? 's' : ''} attention` : ''}. Projected
+                income, upcoming drafts, and payment history.
+              </p>
+            </Text>
+          </div>
+          <ButtonLink href="/admin/revenue">View revenue</ButtonLink>
         </div>
       </Card>
 

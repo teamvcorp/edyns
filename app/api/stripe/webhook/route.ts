@@ -1,5 +1,5 @@
 import Stripe from 'stripe'
-import { getStripe } from '@/lib/stripe'
+import { getStripe, invoiceSubscriptionId } from '@/lib/stripe'
 import {
   applyFeeResult,
   setBillingStatusBySubscription,
@@ -57,17 +57,6 @@ function mapSubscriptionStatus(s: Stripe.Subscription.Status): BillingStatus | n
   if (s === 'past_due' || s === 'unpaid') return 'past_due'
   if (s === 'canceled' || s === 'incomplete_expired') return 'canceled'
   return null
-}
-
-/** Extract the subscription id from an invoice across Stripe API shapes. */
-function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
-  const i = invoice as unknown as {
-    subscription?: string | { id?: string }
-    parent?: { subscription_details?: { subscription?: string } }
-  }
-  if (typeof i.subscription === 'string') return i.subscription
-  if (i.subscription?.id) return i.subscription.id
-  return i.parent?.subscription_details?.subscription
 }
 
 /**

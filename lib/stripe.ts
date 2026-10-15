@@ -46,6 +46,21 @@ export function applicationTotalCents(): number {
   return withProcessingFee(APPLICATION_FEE_CENTS)
 }
 
+/**
+ * Extract the subscription id from an invoice across Stripe API shapes (older
+ * versions expose `subscription`, newer ones `parent.subscription_details`).
+ * Shared by the webhook and the admin revenue view.
+ */
+export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefined {
+  const i = invoice as unknown as {
+    subscription?: string | { id?: string }
+    parent?: { subscription_details?: { subscription?: string } }
+  }
+  if (typeof i.subscription === 'string') return i.subscription
+  if (i.subscription?.id) return i.subscription.id
+  return i.parent?.subscription_details?.subscription
+}
+
 // ---- Importing an existing Stripe customer (admin add-tenant prefill) ----
 
 /** Normalized view of a Stripe customer: demographics + their saved payment method. */
