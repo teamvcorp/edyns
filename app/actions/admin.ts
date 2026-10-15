@@ -28,8 +28,11 @@ import {
   setNextIncomeCheck,
   setEmploymentTypeById,
   resumeBilling,
+  resetVerification,
   type BillingFrequency,
 } from '@/lib/tenants'
+import { removePlaidItem } from '@/lib/plaid'
+import { decryptString } from '@/lib/crypto'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
 import {
   getPayoutById,
@@ -41,7 +44,7 @@ import {
 } from '@/lib/payouts'
 import { totalEquityCentsByPartner, recordRentEquity, repricePropertyEquity } from '@/lib/equity'
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
-import { sendApprovalEmail, sendWelcomeBackEmail } from '@/lib/email'
+import { sendApprovalEmail, sendWelcomeBackEmail, sendVerificationResetEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 
 export type AdminActionState = { error?: string } | undefined
@@ -347,6 +350,62 @@ export async function resendWelcomeEmailAction(formData: FormData): Promise<void
     sent = false
   }
   redirect(`${dest}?welcome=${sent ? 'sent' : 'failed'}`)
+}
+
+// ---- Verification reset (stuck applicants) ----
+
+/**
+ * Wipe a tenant's verification progress so they can re-enter info and start the
+ * flow over (for applicants stuck mid-verification — e.g. Plaid "confirming"
+ * forever, an abandoned Stripe Identity session, or the bank-link cap).
+ *
+ * Order matters: external cleanup happens BEFORE the DB reset so stale sessions
+ * can't complete later and re-verify a tenant we just reset —
+ *  1. cancel the open Stripe Identity session (no-op if already finished),
+ *  2. remove the Plaid Item (invalidates the token, stops its webhooks),
+ *  3. clear all verification fields (resetVerification keeps the application
+ *     info, paid fee, saved payment method, and status).
+ * Blocked while a rent subscription exists — see resetVerification.
+ */
+export async function resetTenantVerificationAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const id = String(formData.get('id') ?? '').trim()
+  const back = `/admin/tenants/${id}`
+  if (formData.get('confirm') !== 'on') redirect(`${back}?reset=confirm`)
+
+  const tenant = await getTenantById(id)
+  if (!tenant) redirect('/admin/tenants')
+  if (tenant.billing) redirect(`${back}?reset=billing`)
+
+  if (tenant.stripeIdentitySessionId && !tenant.identityVerified) {
+    try {
+      await getStripe().identity.verificationSessions.cancel(tenant.stripeIdentitySessionId)
+    } catch {
+      /* only cancellable while requires_input — fine, the DB reset still clears it */
+    }
+  }
+  if (tenant.plaidAccessTokenEnc) {
+    try {
+      await removePlaidItem(decryptString(tenant.plaidAccessTokenEnc))
+    } catch {
+      /* already removed at Plaid / key rotated — don't block the reset */
+    }
+  }
+
+  // Can return false if rent setup raced us since the pre-check above.
+  const ok = await resetVerification(id)
+  if (!ok) redirect(`${back}?reset=billing`)
+
+  try {
+    await sendVerificationResetEmail({ to: tenant.email, name: tenant.name })
+  } catch {
+    /* email is best-effort */
+  }
+
+  revalidatePath('/admin/tenants')
+  revalidatePath(back)
+  revalidatePath('/tenants')
+  redirect(`${back}?reset=done`)
 }
 
 // ---- Rent collection setup (admin-driven, after income is verified) ----

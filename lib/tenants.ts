@@ -509,6 +509,53 @@ export async function markIdentityVerified(opts: {
 
 // ---- Admin ----
 
+/**
+ * Admin reset for stuck applicants: wipe ALL verification progress — Plaid
+ * (tokens, item, link counter), income results, Stripe Identity, paystub, and
+ * security flags — so the tenant can re-enter info and run verification fresh.
+ * Application details, the paid fee, the saved payment method, and the
+ * application status are deliberately kept.
+ *
+ * The filter requires that no billing record exists: the monthly job-loss check
+ * reads income through the Plaid connection, so resetting under an active rent
+ * subscription would silently exempt the tenant from it. Matching in the filter
+ * (not just a pre-check in the caller) makes the guard atomic against a
+ * concurrent rent setup. Returns false when blocked or not found.
+ */
+export async function resetVerification(tenantId: string): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), billing: { $exists: false } },
+    {
+      $set: { updatedAt: new Date() },
+      $unset: {
+        plaidUserToken: '',
+        plaidUserId: '',
+        plaidAccessTokenEnc: '',
+        plaidItemId: '',
+        plaidLinkCount: '',
+        'employment.verified': '',
+        'employment.verificationMethod': '',
+        'employment.verifiedMonthlyIncome': '',
+        'employment.verifiedWeeklyHours': '',
+        'employment.lastPayDate': '',
+        'employment.verifiedAt': '',
+        stripeIdentitySessionId: '',
+        identityVerified: '',
+        identityVerifiedAt: '',
+        idNumberLast4: '',
+        paystub: '',
+        flaggedForReview: '',
+        reviewReason: '',
+        flaggedAt: '',
+        nextIncomeCheckAt: '',
+      },
+    },
+  )
+  return res.matchedCount === 1
+}
+
 export async function listTenants(): Promise<Tenant[]> {
   const col = await tenantsCollection()
   const docs = await col.find({}).sort({ createdAt: -1 }).toArray()

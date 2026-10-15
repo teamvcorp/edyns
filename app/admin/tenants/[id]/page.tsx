@@ -16,6 +16,7 @@ import {
   resumeTenantBillingAction,
   replaceImportedWithBillingAction,
   resendWelcomeEmailAction,
+  resetTenantVerificationAction,
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
@@ -42,16 +43,25 @@ const welcomeCopy: Record<string, string> = {
   notfound: 'Could not find that user account.',
 }
 
+const resetCopy: Record<string, { ok: boolean; text: string }> = {
+  done: { ok: true, text: 'Verification progress was reset — the tenant was emailed to start the flow again.' },
+  confirm: { ok: false, text: 'Check the confirmation box to reset verification.' },
+  billing: {
+    ok: false,
+    text: 'Reset is blocked while rent collection exists — cancel or replace the subscription first.',
+  },
+}
+
 export default async function AdminTenantReviewPage({
   params,
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ welcome?: string }>
+  searchParams: Promise<{ welcome?: string; reset?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { welcome } = await searchParams
+  const { welcome, reset } = await searchParams
   const t = await getTenantById(id)
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
@@ -89,6 +99,17 @@ export default async function AdminTenantReviewPage({
             }
           >
             {welcomeCopy[welcome]}
+          </p>
+        )}
+
+        {reset && resetCopy[reset] && (
+          <p
+            role="status"
+            className={
+              resetCopy[reset].ok ? 'text-sm text-olive-700 dark:text-olive-300' : 'text-sm text-red-600 dark:text-red-400'
+            }
+          >
+            {resetCopy[reset].text}
           </p>
         )}
 
@@ -353,6 +374,36 @@ export default async function AdminTenantReviewPage({
             )}
           </Card>
         )}
+
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Reset verification</h3>
+          <p className="text-sm text-olive-600 dark:text-olive-500">
+            For applicants stuck mid-verification: clears ALL verification progress — identity (ID + selfie), the Plaid
+            bank connection and verified income, any uploaded paystub, the bank-link counter, and security flags — so
+            the tenant can re-enter their info and start the flow over. Their application details, paid fee, saved
+            payment method, and application status are kept. The tenant is emailed to try again.
+          </p>
+          {t.billing ? (
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              Unavailable while rent collection exists — the monthly income check relies on the bank connection. Cancel
+              or replace the subscription first.
+            </p>
+          ) : (
+            <form action={resetTenantVerificationAction} className="flex flex-col gap-3">
+              <input type="hidden" name="id" value={t.id} />
+              <label className="flex items-start gap-2 rounded-lg bg-amber-500/10 px-3 py-2 text-sm text-olive-950 ring-1 ring-amber-500/30 dark:text-white">
+                <input type="checkbox" name="confirm" className="mt-1" />
+                <span>
+                  I understand this disconnects the tenant’s bank, voids any pending ID check, and the tenant must redo
+                  verification from the start.
+                </span>
+              </label>
+              <SoftButton type="submit" className="w-fit text-red-600 dark:text-red-400">
+                Reset verification
+              </SoftButton>
+            </form>
+          )}
+        </Card>
       </Container>
     </section>
   )

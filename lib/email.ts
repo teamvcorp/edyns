@@ -163,6 +163,30 @@ export async function sendApprovalEmail(input: { to: string; name: string }): Pr
 }
 
 /**
+ * Sent when an admin resets a tenant's verification progress (usually because
+ * they got stuck mid-flow): invites them back to the portal to re-enter their
+ * info and redo identity + income verification from the start.
+ */
+export async function sendVerificationResetEmail(input: { to: string; name: string }): Promise<void> {
+  const portalUrl = `${baseUrl}/tenants`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Let’s restart your verification, ${escapeHtml(input.name)}</h2>
+      <p>We’ve <strong>reset your verification</strong> so you can start fresh — sorry about the hiccup. Your
+      application, payment details, and status are unchanged; only the verification steps start over.</p>
+      <p>Sign in to your tenant portal and redo the steps that apply to you:</p>
+      <ul>
+        <li><strong>Identity verification</strong> (government ID + selfie via Stripe)</li>
+        <li><strong>Income verification</strong> — connect your bank with Plaid, or upload your most recent paystub</li>
+      </ul>
+      <p><a href="${portalUrl}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Restart verification</a></p>
+      <p style="color:#6b6b60;font-size:13px">If you get stuck again, just reply to this email and we’ll help.</p>
+    </div>`
+
+  await sendEmail({ to: input.to, subject: 'Your verification was reset — please try again', html })
+}
+
+/**
  * Internal security alert (e.g., suspicious bank-link velocity). Sent to
  * ALERT_EMAIL, falling back to FROM_EMAIL. Best-effort — callers should not let
  * a failed alert break the user flow.

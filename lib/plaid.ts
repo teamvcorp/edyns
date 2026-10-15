@@ -159,6 +159,16 @@ export async function exchangePublicToken(publicToken: string): Promise<{ access
 }
 
 /**
+ * Disconnect a bank: permanently remove the Item at Plaid. Invalidates the
+ * access token, stops its webhooks, and ends Plaid billing for the Item — do
+ * this whenever we discard a stored access token (e.g. a verification reset),
+ * so no orphaned bank connection lingers on Plaid's side.
+ */
+export async function removePlaidItem(accessToken: string): Promise<void> {
+  await getPlaid().itemRemove({ access_token: accessToken })
+}
+
+/**
  * Derive an estimated monthly income (USD) from Plaid Bank Income.
  * Defensive: returns null if the product isn't enabled or the shape is unexpected.
  */
