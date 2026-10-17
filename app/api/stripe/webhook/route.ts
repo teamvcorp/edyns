@@ -9,6 +9,8 @@ import {
 import { getPropertyById } from '@/lib/properties'
 import { recordRentEquity } from '@/lib/equity'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
+import { markPayoutPaid, createPaidPayout, markPayoutReversedByTransfer } from '@/lib/payouts'
+import { findPartnerByStripeAccountId } from '@/lib/users'
 
 /** Default partner equity share when a property hasn't set one. */
 const DEFAULT_EQUITY_SHARE_PERCENT = 10
@@ -122,6 +124,45 @@ export async function POST(request: Request): Promise<Response> {
   } else if (event.type === 'invoice.payment_failed') {
     const subId = invoiceSubscriptionId(event.data.object as Stripe.Invoice)
     if (subId) await setBillingStatusBySubscription(subId, 'past_due')
+  } else if (event.type === 'transfer.created') {
+    // Auto-log every transfer to a partner's connected account as a debit
+    // against their equity balance — including transfers made directly in the
+    // Stripe Dashboard, and as a safety net when an in-app transfer succeeded
+    // but the action's own record write failed. Best-effort: accounting never
+    // fails the webhook response.
+    const transfer = event.data.object as Stripe.Transfer
+    try {
+      const payoutId = transfer.metadata?.payoutId
+      if (payoutId) {
+        // In-app approved request: settle the existing row (idempotent — the
+        // admin action's own markPayoutPaid makes the later call a no-op).
+        await markPayoutPaid(payoutId, transfer.id)
+      } else {
+        // Forced or external transfer: resolve the partner from metadata,
+        // falling back to the destination account. Insert is idempotent on the
+        // transfer id, so a row the admin action already wrote isn't duplicated.
+        const destination = typeof transfer.destination === 'string' ? transfer.destination : transfer.destination?.id
+        const partnerId =
+          transfer.metadata?.partnerId ??
+          (destination ? (await findPartnerByStripeAccountId(destination))?.id : undefined)
+        if (partnerId) {
+          await createPaidPayout(partnerId, transfer.amount, transfer.id, 'external', {
+            paidAt: new Date(transfer.created * 1000),
+            note: 'Recorded automatically from a Stripe transfer',
+          })
+        }
+        // No partner match → not a partner payout; nothing to record.
+      }
+    } catch {
+      /* accounting is best-effort — never fail the webhook over it */
+    }
+  } else if (event.type === 'transfer.reversed') {
+    // Full reversal: flip the debit so the partner's available balance restores.
+    try {
+      await markPayoutReversedByTransfer((event.data.object as Stripe.Transfer).id)
+    } catch {
+      /* best-effort */
+    }
   }
 
   return new Response('ok', { status: 200 })

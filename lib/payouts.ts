@@ -3,7 +3,14 @@ import 'server-only'
 import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 
-export type PayoutStatus = 'requested' | 'paid' | 'declined'
+export type PayoutStatus = 'requested' | 'paid' | 'declined' | 'reversed'
+
+/**
+ * How a paid row came to be: a partner request the admin approved, an admin
+ * force payout, or an external Stripe transfer auto-logged by the webhook
+ * (e.g. made directly in the Stripe Dashboard).
+ */
+export type PayoutSource = 'request' | 'forced' | 'external'
 
 export interface PayoutDoc {
   _id: ObjectId
@@ -11,6 +18,7 @@ export interface PayoutDoc {
   amountCents: number
   status: PayoutStatus
   stripeTransferId?: string
+  source?: PayoutSource
   note?: string
   requestedAt: Date
   decidedAt?: Date
@@ -22,6 +30,7 @@ export type Payout = {
   amountCents: number
   status: PayoutStatus
   stripeTransferId?: string
+  source?: PayoutSource
   note?: string
   requestedAt: Date
   decidedAt?: Date
@@ -32,6 +41,9 @@ async function payoutsCollection(): Promise<Collection<PayoutDoc>> {
   const col = db.collection<PayoutDoc>('payouts')
   await col.createIndex({ partnerId: 1, requestedAt: -1 })
   await col.createIndex({ status: 1 })
+  // One debit row per Stripe transfer — makes action-write vs webhook-write
+  // race-safe (sparse: requested/declined rows have no transfer id yet).
+  await col.createIndex({ stripeTransferId: 1 }, { unique: true, sparse: true })
   return col
 }
 
@@ -42,6 +54,7 @@ function toPayout(d: PayoutDoc): Payout {
     amountCents: d.amountCents,
     status: d.status,
     stripeTransferId: d.stripeTransferId,
+    source: d.source,
     note: d.note,
     requestedAt: d.requestedAt,
     decidedAt: d.decidedAt,
@@ -59,23 +72,40 @@ export async function createPayoutRequest(partnerId: string, amountCents: number
   })
 }
 
-/** Record an already-paid payout (admin force payout — transfer done in the caller). */
+/**
+ * Record an already-paid payout: the debit for a Stripe transfer done in the
+ * caller (admin force payout) or observed by the webhook (external transfer).
+ * Idempotent on the transfer id — the same transfer recorded by both the admin
+ * action and the webhook yields exactly one row (duplicate insert is ignored).
+ */
 export async function createPaidPayout(
   partnerId: string,
   amountCents: number,
   stripeTransferId: string,
+  source: PayoutSource,
+  opts?: { paidAt?: Date; note?: string },
 ): Promise<void> {
+  if (!ObjectId.isValid(partnerId)) return
   const col = await payoutsCollection()
-  const now = new Date()
-  await col.insertOne({
-    _id: new ObjectId(),
-    partnerId: new ObjectId(partnerId),
-    amountCents,
-    status: 'paid',
-    stripeTransferId,
-    requestedAt: now,
-    decidedAt: now,
-  })
+  const at = opts?.paidAt ?? new Date()
+  try {
+    await col.insertOne({
+      _id: new ObjectId(),
+      partnerId: new ObjectId(partnerId),
+      amountCents,
+      status: 'paid',
+      stripeTransferId,
+      source,
+      note: opts?.note,
+      requestedAt: at,
+      decidedAt: at,
+    })
+  } catch (err) {
+    // Duplicate transfer id (already recorded) — safe to ignore; rethrow anything else.
+    if (!(err && typeof err === 'object' && 'code' in err && (err as { code?: number }).code === 11000)) {
+      throw err
+    }
+  }
 }
 
 export async function hasPendingRequest(partnerId: string): Promise<boolean> {
@@ -128,7 +158,22 @@ export async function markPayoutPaid(id: string, stripeTransferId: string): Prom
   const col = await payoutsCollection()
   const res = await col.updateOne(
     { _id: new ObjectId(id), status: 'requested' },
-    { $set: { status: 'paid', stripeTransferId, decidedAt: new Date() } },
+    { $set: { status: 'paid', source: 'request' satisfies PayoutSource, stripeTransferId, decidedAt: new Date() } },
+  )
+  return res.modifiedCount === 1
+}
+
+/**
+ * Flip the debit for a (fully) reversed Stripe transfer. A 'reversed' row drops
+ * out of the paid total, restoring the partner's available balance. Partial
+ * reversals are out of scope — Stripe only fires transfer.reversed when the
+ * full amount is reversed.
+ */
+export async function markPayoutReversedByTransfer(stripeTransferId: string): Promise<boolean> {
+  const col = await payoutsCollection()
+  const res = await col.updateOne(
+    { stripeTransferId, status: 'paid' },
+    { $set: { status: 'reversed', decidedAt: new Date() } },
   )
   return res.modifiedCount === 1
 }

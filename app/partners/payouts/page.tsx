@@ -28,7 +28,7 @@ const banner: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
   error: { text: 'Something went wrong. Please try again.', tone: 'warn' },
 }
 
-const payoutStatusLabel = { requested: 'Pending approval', paid: 'Paid', declined: 'Declined' } as const
+const payoutStatusLabel = { requested: 'Pending approval', paid: 'Paid', declined: 'Declined', reversed: 'Reversed' } as const
 
 export default async function PartnerPayoutsPage({
   searchParams,
@@ -206,7 +206,12 @@ export default async function PartnerPayoutsPage({
             <div className="flex flex-col divide-y divide-olive-950/10 dark:divide-white/10">
               {payouts.map((p) => (
                 <div key={p.id} className="flex items-center justify-between gap-3 py-3 text-sm">
-                  <span className="text-olive-950 dark:text-white">{formatCurrency(p.amountCents / 100)}</span>
+                  <span className="text-olive-950 dark:text-white">
+                    {formatCurrency(p.amountCents / 100)}
+                    {p.source === 'external' && (
+                      <span className="ml-2 text-xs text-olive-600 dark:text-olive-500">direct transfer</span>
+                    )}
+                  </span>
                   <span className="text-olive-600 dark:text-olive-500">{p.requestedAt.toLocaleDateString()}</span>
                   <span className="font-semibold text-olive-700 dark:text-olive-300">{payoutStatusLabel[p.status]}</span>
                 </div>

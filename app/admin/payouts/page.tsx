@@ -13,7 +13,7 @@ export const metadata: Metadata = { title: 'Payout requests' }
 
 import { inputClassInline as inputClass } from '@/components/elements/input'
 
-const statusLabel = { requested: 'Pending', paid: 'Paid', declined: 'Declined' } as const
+const statusLabel = { requested: 'Pending', paid: 'Paid', declined: 'Declined', reversed: 'Reversed' } as const
 
 const banner: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
   paid: { text: 'Payout transferred to the partner’s connected account.', tone: 'ok' },
@@ -111,8 +111,19 @@ export default async function AdminPayoutsPage({
                   {request.status === 'declined' && request.note && (
                     <span className="text-sm text-red-600 dark:text-red-400">{request.note}</span>
                   )}
+                  {request.source === 'external' && (
+                    <span className="text-sm text-olive-600 dark:text-olive-500">
+                      Recorded from a Stripe transfer{request.stripeTransferId ? ` · ${request.stripeTransferId}` : ''}
+                    </span>
+                  )}
                 </div>
-                <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">
+                <span
+                  className={
+                    request.status === 'reversed'
+                      ? 'text-sm font-semibold text-red-600 dark:text-red-400'
+                      : 'text-sm font-semibold text-olive-700 dark:text-olive-300'
+                  }
+                >
                   {statusLabel[request.status]}
                 </span>
               </Card>

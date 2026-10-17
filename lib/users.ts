@@ -59,6 +59,8 @@ async function usersCollection(): Promise<Collection<UserDoc>> {
   const col = db.collection<UserDoc>('users')
   // Idempotent: ensures unique email per role on first use.
   await col.createIndex({ email: 1, role: 1 }, { unique: true })
+  // Webhook lookups: which partner owns a Stripe Connect account (sparse — tenants have none).
+  await col.createIndex({ stripeAccountId: 1 }, { sparse: true })
   return col
 }
 
@@ -104,6 +106,14 @@ export async function setPayoutFrequency(userId: string, frequency: PayoutFreque
   if (!ObjectId.isValid(userId)) return
   const col = await usersCollection()
   await col.updateOne({ _id: new ObjectId(userId), role: 'partner' }, { $set: { payoutFrequency: frequency } })
+}
+
+/** The partner who owns a Stripe Connect account (webhook transfer routing). */
+export async function findPartnerByStripeAccountId(accountId: string): Promise<PartnerProfile | null> {
+  if (!accountId.startsWith('acct_')) return null
+  const col = await usersCollection()
+  const doc = await col.findOne({ stripeAccountId: accountId, role: 'partner' })
+  return doc ? toPartnerProfile(doc) : null
 }
 
 /** Safe partner profile by id — never returns the password hash or tax ID ciphertext. */

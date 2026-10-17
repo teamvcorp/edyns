@@ -762,12 +762,17 @@ export async function approvePayoutAction(formData: FormData): Promise<void> {
   try {
     const account = await getStripe().accounts.retrieve(partner!.stripeAccountId!)
     if (account.payouts_enabled) {
-      const transfer = await getStripe().transfers.create({
-        amount: payout!.amountCents,
-        currency: 'usd',
-        destination: partner!.stripeAccountId!,
-        metadata: { payoutId: id, partnerId: payout!.partnerId },
-      })
+      // Idempotency key: a double-click (or retry) replays the SAME transfer in
+      // Stripe instead of sending the money twice.
+      const transfer = await getStripe().transfers.create(
+        {
+          amount: payout!.amountCents,
+          currency: 'usd',
+          destination: partner!.stripeAccountId!,
+          metadata: { payoutId: id, partnerId: payout!.partnerId },
+        },
+        { idempotencyKey: `payout_${id}` },
+      )
       transferId = transfer.id
     }
   } catch {
@@ -816,12 +821,19 @@ export async function forcePayoutAction(formData: FormData): Promise<void> {
   try {
     const account = await getStripe().accounts.retrieve(partner!.stripeAccountId!)
     if (account.payouts_enabled) {
-      const transfer = await getStripe().transfers.create({
-        amount: availableCents,
-        currency: 'usd',
-        destination: partner!.stripeAccountId!,
-        metadata: { partnerId, forced: 'true' },
-      })
+      // Idempotency key on (partner, amount): a double-click replays the same
+      // transfer. Caveat: within Stripe's 24h idempotency window an identical
+      // re-force returns the cached transfer (and its duplicate record is
+      // ignored) — safe, it can never double-pay.
+      const transfer = await getStripe().transfers.create(
+        {
+          amount: availableCents,
+          currency: 'usd',
+          destination: partner!.stripeAccountId!,
+          metadata: { partnerId, forced: 'true' },
+        },
+        { idempotencyKey: `force_${partnerId}_${availableCents}` },
+      )
       transferId = transfer.id
     }
   } catch {
@@ -830,7 +842,7 @@ export async function forcePayoutAction(formData: FormData): Promise<void> {
 
   if (!transferId) redirect(`${back}?payout=transfer-failed`)
 
-  await createPaidPayout(partnerId, availableCents, transferId)
+  await createPaidPayout(partnerId, availableCents, transferId, 'forced')
   revalidatePath('/admin/payouts')
   revalidatePath(back)
   redirect(`${back}?payout=paid`)
