@@ -1,5 +1,6 @@
 'use client'
 
+import { inputClassInline } from '@/components/elements/input'
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/elements/button'
@@ -54,7 +55,7 @@ export function SelfEmployedToggle({ selfEmployed, hourlyRate }: { selfEmployed:
               value={rate}
               onChange={(e) => setRate(e.target.value)}
               placeholder="e.g. 22.00"
-              className="w-32 rounded-lg bg-white/70 px-3 py-1.5 text-sm text-olive-950 ring-1 ring-olive-950/10 outline-none focus:ring-2 focus:ring-olive-950 dark:bg-white/10 dark:text-white dark:ring-white/10"
+              className={`w-32 ${inputClassInline}`}
             />
             <Button type="button" onClick={() => save(true, rate)} disabled={pending}>
               {pending ? 'Saving…' : 'Save'}

@@ -7,6 +7,7 @@ import {
 import { readIncome } from '@/lib/income'
 import { getStripe } from '@/lib/stripe'
 import { sendSecurityAlert } from '@/lib/email'
+import { safeEqual } from '@/lib/crypto'
 
 /**
  * Monthly income / job-loss check. Runs daily (Vercel Cron) and processes
@@ -20,7 +21,8 @@ import { sendSecurityAlert } from '@/lib/email'
 export async function GET(request: Request): Promise<Response> {
   const secret = process.env.CRON_SECRET
   if (!secret) return new Response('Cron not configured', { status: 500 })
-  if (request.headers.get('authorization') !== `Bearer ${secret}`) {
+  // Constant-time compare so the secret can't be guessed byte-by-byte via timing.
+  if (!safeEqual(request.headers.get('authorization') ?? '', `Bearer ${secret}`)) {
     return new Response('Unauthorized', { status: 401 })
   }
 

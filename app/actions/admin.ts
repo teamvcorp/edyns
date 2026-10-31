@@ -13,7 +13,14 @@ import {
   transferProperty,
 } from '@/lib/properties'
 import { parsePropertyForm } from '@/lib/property-input'
-import { updatePartner, deletePartner, findPartnerById, resetUserPassword } from '@/lib/users'
+import {
+  updatePartner,
+  deletePartner,
+  findPartnerById,
+  findPartnerByStripeAccountId,
+  setStripeAccountId,
+  resetUserPassword,
+} from '@/lib/users'
 import {
   approveTenant,
   rejectTenant,
@@ -32,8 +39,10 @@ import {
   markIdentityVerifiedManually,
   markFeeCollectedOffline,
   setVerifiedIncomeManually,
+  recordPaystubUpload,
   type BillingFrequency,
 } from '@/lib/tenants'
+import { savePaystubFile } from '@/lib/paystubs'
 import { removePlaidItem } from '@/lib/plaid'
 import { decryptString } from '@/lib/crypto'
 import { getRequestById, setRequestStatus } from '@/lib/moveins'
@@ -796,6 +805,41 @@ export async function declinePayoutAction(formData: FormData): Promise<void> {
 }
 
 /**
+ * Admin-only: attach an EXISTING Stripe Connect account (acct_…) to a partner,
+ * e.g. one created before this app existed. Partners can't do this themselves —
+ * otherwise a partner could link someone else's account and misdirect payouts
+ * or transfer attribution in the webhook.
+ *
+ * Guards: the id must exist on our platform and must not already belong to a
+ * different partner (findPartnerByStripeAccountId drives webhook attribution,
+ * so it has to stay one-to-one).
+ */
+export async function linkPartnerStripeAccountAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const partnerId = String(formData.get('partnerId') ?? '')
+  const accountId = String(formData.get('accountId') ?? '').trim()
+  const back = (code: string) => redirect(`/admin/partners/${encodeURIComponent(partnerId)}?payout=${code}`)
+
+  const partner = await findPartnerById(partnerId)
+  if (!partner) redirect('/admin/partners')
+  if (!/^acct_[A-Za-z0-9]{6,64}$/.test(accountId)) back('bad-account')
+
+  const owner = await findPartnerByStripeAccountId(accountId)
+  if (owner && owner.id !== partnerId) back('account-taken')
+
+  try {
+    await getStripe().accounts.retrieve(accountId)
+  } catch (err) {
+    console.error('[admin] Stripe account lookup failed:', err)
+    back('account-missing')
+  }
+
+  await setStripeAccountId(partnerId, accountId)
+  revalidatePath(`/admin/partners/${partnerId}`)
+  back('linked')
+}
+
+/**
  * Admin force payout: pay out a partner's full available balance immediately
  * (ledger total − already paid − pending), transferring via Stripe Connect and
  * recording a paid payout. Available drops to zero; lifetime equity is unchanged.
@@ -846,4 +890,26 @@ export async function forcePayoutAction(formData: FormData): Promise<void> {
   revalidatePath('/admin/payouts')
   revalidatePath(back)
   redirect(`${back}?payout=paid`)
+}
+
+/**
+ * Admin-only, last-resort income evidence: upload a tenant's paystub when Plaid
+ * can't verify them. The FILE itself comes in the form (never a link), is
+ * type-checked by magic bytes, encrypted, and stored privately (lib/paystubs.ts).
+ * This doesn't verify income on its own — the admin reviews it, then records the
+ * figures with the manual income form.
+ */
+export async function uploadPaystubAction(formData: FormData): Promise<void> {
+  await requireRole('admin', '/admin/login')
+  const tenantId = String(formData.get('tenantId') ?? '')
+  const tenant = await getTenantById(tenantId)
+  if (!tenant) redirect('/admin/tenants')
+
+  const file = formData.get('paystub')
+  const result = await savePaystubFile(tenantId, file instanceof File ? file : null)
+  if (!result.ok) redirect(`/admin/tenants/${tenantId}?paystub=${result.error}`)
+
+  await recordPaystubUpload(tenantId, { contentType: result.contentType, uploadedAt: result.uploadedAt })
+  revalidatePath(`/admin/tenants/${tenantId}`)
+  redirect(`/admin/tenants/${tenantId}?paystub=saved`)
 }

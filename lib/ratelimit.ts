@@ -20,11 +20,18 @@ export interface RateLimitResult {
   remaining: number
 }
 
+// TTL index is idempotent but costs a round trip — create it once per instance.
+let ttlIndexReady: Promise<unknown> | undefined
+
 export async function rateLimit(opts: { key: string; limit: number; windowMs: number }): Promise<RateLimitResult> {
   try {
     const db = await getDb()
     const col = db.collection<RateDoc>('rateLimits')
-    await col.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 })
+    ttlIndexReady ??= col.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }).catch((err) => {
+      ttlIndexReady = undefined
+      throw err
+    })
+    await ttlIndexReady
 
     const now = Date.now()
     const windowStart = Math.floor(now / opts.windowMs) * opts.windowMs
@@ -37,8 +44,10 @@ export async function rateLimit(opts: { key: string; limit: number; windowMs: nu
     )
     const count = doc?.count ?? 1
     return { allowed: count <= opts.limit, remaining: Math.max(0, opts.limit - count) }
-  } catch {
-    // Fail open: a rate-limit backend hiccup must not lock out all users.
+  } catch (err) {
+    // Fail open: a rate-limit backend hiccup must not lock out all users — but
+    // log it, because while this fires login throttling is effectively off.
+    console.error('[ratelimit] backend error, failing open:', err)
     return { allowed: true, remaining: 0 }
   }
 }

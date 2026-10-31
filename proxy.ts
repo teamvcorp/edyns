@@ -25,11 +25,11 @@ export async function proxy(req: NextRequest) {
   const isPublicPath = area.publicPaths.includes(pathname)
 
   if (isPublicPath) {
-    // Bounce already-signed-in users off the LOGIN page only — keep enroll (and
-    // other public pages) reachable even when authenticated.
-    if (pathname === area.login && session?.role === area.role) {
-      return NextResponse.redirect(new URL(area.prefix, req.nextUrl))
-    }
+    // NOTE: we intentionally do NOT bounce signed-in users off the login page
+    // here. The proxy can only see the cookie, not whether the DAL has revoked
+    // it (password change / deleted account). Bouncing a revoked cookie to the
+    // portal would loop: portal → DAL → login → proxy → portal. The login pages
+    // do that redirect themselves using the fully validated session.
     return NextResponse.next()
   }
 

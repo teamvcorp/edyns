@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { sessionWithRole } from '@/lib/dal'
 import { getStripe } from '@/lib/stripe'
 import { setIdentitySession } from '@/lib/tenants'
 
@@ -7,8 +7,8 @@ const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000').re
 
 /** Start a Stripe Identity (document + selfie) session for the signed-in tenant. */
 export async function POST(): Promise<NextResponse> {
-  const session = await getSession()
-  if (session?.role !== 'tenant') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await sessionWithRole('tenant')
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
     const vs = await getStripe().identity.verificationSessions.create({
@@ -20,6 +20,8 @@ export async function POST(): Promise<NextResponse> {
     await setIdentitySession(session.sub, vs.id)
     return NextResponse.json({ url: vs.url })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Stripe error' }, { status: 502 })
+    // Log the real cause server-side; never echo provider errors to the browser.
+    console.error('[identity/start] Stripe error:', err)
+    return NextResponse.json({ error: 'Could not start verification. Please try again.' }, { status: 502 })
   }
 }

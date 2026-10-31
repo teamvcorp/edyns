@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { redirectIfSignedIn } from '@/lib/dal'
 import { AuthShell } from '@/components/auth/auth-shell'
 import { LoginForm } from '@/components/auth/login-form'
 import { Link } from '@/components/elements/link'
@@ -6,7 +7,9 @@ import { loginTenant } from '@/app/actions/auth'
 
 export const metadata: Metadata = { title: 'Tenant log in' }
 
-export default function TenantLoginPage() {
+export default async function TenantLoginPage() {
+  await redirectIfSignedIn('tenant', '/tenants')
+
   return (
     <AuthShell
       eyebrow="Tenants"

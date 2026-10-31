@@ -20,6 +20,7 @@ import {
   resetTenantVerificationAction,
   markIdentityVerifiedManuallyAction,
   markFeeCollectedOfflineAction,
+  uploadPaystubAction,
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency } from '@/lib/format'
@@ -52,6 +53,13 @@ const overrideCopy: Record<string, { ok: boolean; text: string }> = {
   confirm: { ok: false, text: 'Check the confirmation box to apply the override.' },
 }
 
+const paystubCopy: Record<string, { ok: boolean; text: string }> = {
+  saved: { ok: true, text: 'Paystub saved securely. Review it, then record the verified income below.' },
+  missing: { ok: false, text: 'Choose a file to upload.' },
+  'too-big': { ok: false, text: 'That file is over 4 MB — please upload a smaller scan or photo.' },
+  'bad-type': { ok: false, text: 'Only PDF, JPEG, PNG or WebP files are accepted.' },
+}
+
 const resetCopy: Record<string, { ok: boolean; text: string }> = {
   done: { ok: true, text: 'Verification progress was reset — the tenant was emailed to start the flow again.' },
   confirm: { ok: false, text: 'Check the confirmation box to reset verification.' },
@@ -66,11 +74,11 @@ export default async function AdminTenantReviewPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>
-  searchParams: Promise<{ welcome?: string; reset?: string; override?: string }>
+  searchParams: Promise<{ welcome?: string; reset?: string; override?: string; paystub?: string }>
 }) {
   await requireRole('admin', '/admin/login')
   const { id } = await params
-  const { welcome, reset, override } = await searchParams
+  const { welcome, reset, override, paystub } = await searchParams
   const t = await getTenantById(id)
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
@@ -261,21 +269,67 @@ export default async function AdminTenantReviewPage({
             {t.paystub && (
               <div className="sm:col-span-2">
                 <Row
-                  label="Uploaded paystub"
+                  label="Paystub (admin upload)"
                   value={
-                    <a
-                      href={t.paystub.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-medium text-olive-700 underline dark:text-olive-300"
-                    >
-                      View paystub
-                    </a>
+                    t.paystub.url ? (
+                      // Legacy record from the old tenant self-upload (public Blob URL).
+                      <span className="text-red-600 dark:text-red-400">
+                        Legacy public upload —{' '}
+                        <a href={t.paystub.url} target="_blank" rel="noopener noreferrer" className="underline">
+                          view
+                        </a>
+                        , then re-upload it below and delete the old file from Vercel Blob.
+                      </span>
+                    ) : (
+                      <a
+                        href={`/admin/tenants/${t.id}/paystub`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-olive-700 underline dark:text-olive-300"
+                      >
+                        View paystub (uploaded {t.paystub.uploadedAt.toLocaleDateString()})
+                      </a>
+                    )
                   }
                 />
               </div>
             )}
           </dl>
+          {paystub && paystubCopy[paystub] && (
+            <p
+              role="status"
+              className={
+                paystubCopy[paystub].ok
+                  ? 'text-sm text-olive-700 dark:text-olive-300'
+                  : 'text-sm text-red-600 dark:text-red-400'
+              }
+            >
+              {paystubCopy[paystub].text}
+            </p>
+          )}
+          {/* Last resort only: tenants must use Plaid. The file is encrypted and never gets a public URL. */}
+          <form
+            action={uploadPaystubAction}
+            className="flex flex-col gap-2 rounded-xl bg-olive-950/5 p-4 dark:bg-white/5"
+          >
+            <input type="hidden" name="tenantId" value={t.id} />
+            <label className="flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white">
+              Upload paystub (last resort — only if Plaid can’t verify this tenant)
+              <input
+                type="file"
+                name="paystub"
+                required
+                accept="application/pdf,image/jpeg,image/png,image/webp"
+                className="text-base text-olive-700 sm:text-sm dark:text-olive-300"
+              />
+            </label>
+            <span className="text-xs text-olive-600 dark:text-olive-500">
+              PDF, JPEG, PNG or WebP, up to 4 MB. Stored encrypted; replaces any previous paystub.
+            </span>
+            <SoftButton type="submit" className="w-fit">
+              Save paystub
+            </SoftButton>
+          </form>
           <EmploymentTypeForm
             tenantId={t.id}
             selfEmployed={Boolean(t.employment.selfEmployed)}
@@ -414,10 +468,10 @@ export default async function AdminTenantReviewPage({
                   </div>
                 )}
               </>
-            ) : !t.employment.verified && !t.paystub ? (
+            ) : !t.employment.verified ? (
               <p className="text-sm text-olive-600 dark:text-olive-500">
-                Waiting on income verification — the tenant must connect their bank via Plaid or upload a paystub before
-                you can set up rent collection.
+                Waiting on income verification — the tenant must connect their bank via Plaid (or, as a last resort, you
+                upload their paystub and record the verified income above) before you can set up rent collection.
               </p>
             ) : !t.defaultPaymentMethodId ? (
               <p className="text-sm text-red-600 dark:text-red-400">
@@ -430,7 +484,7 @@ export default async function AdminTenantReviewPage({
                   Income on file{' '}
                   {t.employment.verified
                     ? `(${t.employment.verificationMethod === 'manual' ? 'verified manually' : 'Plaid'}${t.employment.verifiedMonthlyIncome ? ` · ${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo verified` : ''})`
-                    : '(paystub uploaded — review it above)'}
+                    : ''}
                   . Enter the recurring 40% amount, frequency, and first draft date.
                 </p>
                 {t.employment.verifiedWeeklyHours != null && t.employment.verifiedWeeklyHours < REQUIRED_WEEKLY_HOURS && (

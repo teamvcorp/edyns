@@ -20,11 +20,16 @@ export interface SessionPayload {
   name?: string
   /** True while the user is on an admin-issued temp password (must set a new one). */
   mustReset?: boolean
+  /** users.sessionVersion at issue time; the DAL rejects the cookie once it changes. */
+  ver?: number
   [key: string]: unknown
 }
 
 export const SESSION_COOKIE = 'edyns_session'
-const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+const SESSION_DURATION_MS = 7 * 24 * 60 * 60 * 1000 // 7 days (partners / tenants)
+// Admin has the widest blast radius and no per-user record to revoke, so keep
+// its window short: a stolen admin cookie is only useful for a working day.
+const ADMIN_SESSION_DURATION_MS = 8 * 60 * 60 * 1000 // 8 hours
 
 const secret = process.env.NEXTAUTH_SECRET
 if (!secret) {
@@ -56,7 +61,8 @@ export async function decrypt(token: string | undefined): Promise<SessionPayload
 }
 
 export async function createSession(payload: SessionPayload): Promise<void> {
-  const expiresAt = new Date(Date.now() + SESSION_DURATION_MS)
+  const duration = payload.role === 'admin' ? ADMIN_SESSION_DURATION_MS : SESSION_DURATION_MS
+  const expiresAt = new Date(Date.now() + duration)
   const token = await encrypt(payload, expiresAt)
   const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE, token, {

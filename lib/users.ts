@@ -42,6 +42,13 @@ export interface UserDoc {
    * The user is forced to choose a new password before they can use their portal.
    */
   mustResetPassword?: boolean
+  /**
+   * Bumped whenever the password changes (self-service or admin reset). Each
+   * session cookie carries the version it was issued with; the DAL rejects
+   * cookies whose version no longer matches, so a password change signs out
+   * every other device. Missing = 0 (accounts created before this field).
+   */
+  sessionVersion?: number
   createdAt: Date
 }
 
@@ -54,14 +61,42 @@ export type PublicUser = {
   role: Exclude<Role, 'admin'>
 }
 
+// Index creation is idempotent but costs a round trip, so run it once per
+// server instance rather than on every query (the DAL now reads users per request).
+let indexesReady: Promise<unknown> | undefined
+
 async function usersCollection(): Promise<Collection<UserDoc>> {
   const db = await getDb()
   const col = db.collection<UserDoc>('users')
-  // Idempotent: ensures unique email per role on first use.
-  await col.createIndex({ email: 1, role: 1 }, { unique: true })
-  // Webhook lookups: which partner owns a Stripe Connect account (sparse — tenants have none).
-  await col.createIndex({ stripeAccountId: 1 }, { sparse: true })
+  indexesReady ??= Promise.all([
+    // Unique email per role.
+    col.createIndex({ email: 1, role: 1 }, { unique: true }),
+    // Webhook lookups: which partner owns a Stripe Connect account (sparse — tenants have none).
+    col.createIndex({ stripeAccountId: 1 }, { sparse: true }),
+  ]).catch((err) => {
+    indexesReady = undefined // retry on the next call
+    throw err
+  })
+  await indexesReady
   return col
+}
+
+/**
+ * Minimal per-request auth state for the DAL: does the account still exist,
+ * which session version is current, and is a password reset pending?
+ * Returns null if the user was deleted (their cookie must stop working).
+ */
+export async function getSessionState(
+  userId: string,
+): Promise<{ sessionVersion: number; mustReset: boolean } | null> {
+  if (!ObjectId.isValid(userId)) return null
+  const col = await usersCollection()
+  const doc = await col.findOne(
+    { _id: new ObjectId(userId) },
+    { projection: { sessionVersion: 1, mustResetPassword: 1 } },
+  )
+  if (!doc) return null
+  return { sessionVersion: doc.sessionVersion ?? 0, mustReset: Boolean(doc.mustResetPassword) }
 }
 
 function toPublicUser(doc: UserDoc): PublicUser {
@@ -180,12 +215,12 @@ export async function verifyCredentials(
   email: string,
   password: string,
   role: Exclude<Role, 'admin'>,
-): Promise<(PublicUser & { mustReset: boolean }) | null> {
+): Promise<(PublicUser & { mustReset: boolean; sessionVersion: number }) | null> {
   const user = await findUserByEmail(email, role)
   const hash = user?.passwordHash ?? '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinv'
   const ok = await bcrypt.compare(password, hash)
   if (!ok || !user) return null
-  return { ...toPublicUser(user), mustReset: Boolean(user.mustResetPassword) }
+  return { ...toPublicUser(user), mustReset: Boolean(user.mustResetPassword), sessionVersion: user.sessionVersion ?? 0 }
 }
 
 /** A short, URL-safe temporary password (~12 chars) for admin-issued resets. */
@@ -207,20 +242,29 @@ export async function resetUserPassword(
   if (!user) return null
   const tempPassword = generateTempPassword()
   const passwordHash = await bcrypt.hash(tempPassword, 10)
-  await col.updateOne({ _id: user._id }, { $set: { passwordHash, mustResetPassword: true } })
+  // $inc sessionVersion: any session issued before this reset stops working.
+  await col.updateOne(
+    { _id: user._id },
+    { $set: { passwordHash, mustResetPassword: true }, $inc: { sessionVersion: 1 } },
+  )
   return { email: user.email, name: user.name, role: user.role, tempPassword }
 }
 
-/** Set a user's password (their own choice) and clear the force-reset flag. */
-export async function setUserPassword(userId: string, newPassword: string): Promise<boolean> {
-  if (!ObjectId.isValid(userId)) return false
+/**
+ * Set a user's password (their own choice) and clear the force-reset flag.
+ * Bumps sessionVersion (signing out every other device) and returns the new
+ * version so the caller can reissue THIS device's session with it; null on failure.
+ */
+export async function setUserPassword(userId: string, newPassword: string): Promise<number | null> {
+  if (!ObjectId.isValid(userId)) return null
   const col = await usersCollection()
   const passwordHash = await bcrypt.hash(newPassword, 10)
-  const res = await col.updateOne(
+  const doc = await col.findOneAndUpdate(
     { _id: new ObjectId(userId) },
-    { $set: { passwordHash }, $unset: { mustResetPassword: '' } },
+    { $set: { passwordHash }, $unset: { mustResetPassword: '' }, $inc: { sessionVersion: 1 } },
+    { returnDocument: 'after', projection: { sessionVersion: 1 } },
   )
-  return res.matchedCount === 1
+  return doc ? (doc.sessionVersion ?? 0) : null
 }
 
 export async function createUser(input: {

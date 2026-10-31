@@ -8,7 +8,6 @@ import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
-import { PaystubUploader } from '@/components/tenants/paystub-uploader'
 import { SelfEmployedToggle } from '@/components/tenants/self-employed-toggle'
 import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
 import { MoveInButton } from '@/components/properties/move-in-button'
@@ -71,9 +70,7 @@ export default async function TenantPortalPage({
     ? 'Verified'
     : plaidPending
       ? 'Confirming'
-      : tenant.paystub
-        ? 'Paystub uploaded'
-        : tenant.status === 'approved'
+      : tenant.status === 'approved'
           ? 'Action needed'
           : 'After approval'
 
@@ -200,14 +197,10 @@ export default async function TenantPortalPage({
               <>
                 <Text className="text-sm/6">
                   <p>
-                    We couldn’t confirm your weekly hours automatically. Please upload your most recent paystub so we can
-                    confirm you’re working {REQUIRED_WEEKLY_HOURS}+ hours a week.
+                    We couldn’t confirm your weekly hours automatically. Our team will reach out to confirm you’re
+                    working {REQUIRED_WEEKLY_HOURS}+ hours a week — no action is needed from you right now.
                   </p>
                 </Text>
-                <PaystubUploader currentUrl={tenant.paystub?.url} />
-                {tenant.paystub && (
-                  <p className="text-sm text-olive-700 dark:text-olive-300">Paystub received — our team will review it.</p>
-                )}
               </>
             )}
           </>
@@ -217,8 +210,8 @@ export default async function TenantPortalPage({
               <Text className="text-sm/6">
                 <p>
                   We connected your account and are <strong>confirming your income</strong> — this can take a few
-                  minutes, and we’ll email you when it’s done. If it doesn’t go through, you can verify with bank
-                  deposits or upload a paystub below.
+                  minutes, and we’ll email you when it’s done. If it doesn’t go through, you can try again with
+                  the bank-deposits option below.
                 </p>
               </Text>
             ) : (
@@ -234,16 +227,10 @@ export default async function TenantPortalPage({
               hourlyRate={tenant.employment.claimedHourlyRate}
             />
             <PlaidVerifyButton selfEmployed={Boolean(tenant.employment.selfEmployed)} />
-            <div className="mt-2 flex flex-col gap-2 border-t border-olive-950/10 pt-3 dark:border-white/10">
-              <span className="text-xs text-olive-600 dark:text-olive-500">
-                Trouble connecting your bank, or we couldn’t confirm your hours? Upload your most recent paystub (PDF or
-                image) and our team will verify it manually.
-              </span>
-              <PaystubUploader currentUrl={tenant.paystub?.url} />
-              {tenant.paystub && (
-                <p className="text-sm text-olive-700 dark:text-olive-300">Paystub received — our team will review it.</p>
-              )}
-            </div>
+            {/* Plaid is the only self-service income path; document uploads are admin-only. */}
+            <p className="mt-2 border-t border-olive-950/10 pt-3 text-xs text-olive-600 dark:border-white/10 dark:text-olive-500">
+              Trouble connecting your bank? Reply to your approval email and our team will help you finish verification.
+            </p>
           </>
         )}
       </Card>

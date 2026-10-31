@@ -2,6 +2,7 @@ import 'server-only'
 
 import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
+import { deletePaystubFile } from './paystubs'
 import type { Address } from './users'
 
 export interface Person {
@@ -97,8 +98,13 @@ export interface TenantDoc {
   /** True when an admin attested the ID in person instead of Stripe Identity (paper/imported tenants). */
   identityManual?: boolean
   idNumberLast4?: string
-  /** Manually uploaded paystub — alternative to Plaid for income verification. */
-  paystub?: { url: string; uploadedAt: Date }
+  /**
+   * Admin-uploaded paystub (last resort when Plaid can't verify). The file itself
+   * is encrypted in the `paystubs` collection (lib/paystubs.ts) — only metadata
+   * lives here. `url` exists only on LEGACY records from when tenants uploaded
+   * to public Blob storage; new uploads never set it.
+   */
+  paystub?: { uploadedAt: Date; contentType?: string; url?: string }
   /** Bank-link velocity monitoring (Plaid): number of completed link attempts. */
   plaidLinkCount?: number
   /** Set when automated checks flag this application for manual security review. */
@@ -370,19 +376,22 @@ export async function flagTenantForReview(userId: string, reason: string): Promi
   )
 }
 
-/** Save a manually uploaded paystub (alternative to Plaid). Income is confirmed by the admin. */
-export async function setPaystub(userId: string, url: string): Promise<void> {
+/**
+ * Record that an admin stored a paystub for this tenant (file is in lib/paystubs.ts).
+ * Does NOT mark income verified — the admin still enters the verified figures
+ * with the manual income form after reviewing it. Clears any legacy public URL.
+ */
+export async function recordPaystubUpload(
+  tenantId: string,
+  meta: { contentType: string; uploadedAt: Date },
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
   const col = await tenantsCollection()
-  await col.updateOne(
-    { userId: new ObjectId(userId) },
-    {
-      $set: {
-        paystub: { url, uploadedAt: new Date() },
-        'employment.verificationMethod': 'manual',
-        updatedAt: new Date(),
-      },
-    },
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    { $set: { paystub: { contentType: meta.contentType, uploadedAt: meta.uploadedAt }, updatedAt: new Date() } },
   )
+  return res.matchedCount === 1
 }
 
 /** Look up a tenant by their Plaid item id (item-based income webhooks). */
@@ -632,6 +641,8 @@ export async function resetVerification(tenantId: string): Promise<boolean> {
       },
     },
   )
+  // Verification restarts from scratch, so the stored paystub goes too.
+  if (res.matchedCount === 1) await deletePaystubFile(tenantId)
   return res.matchedCount === 1
 }
 

@@ -5,7 +5,13 @@ import { findPartnerById } from '@/lib/users'
 import { listPropertiesByPartner } from '@/lib/properties'
 import { totalEquityCentsByPartner } from '@/lib/equity'
 import { totalPaidCentsByPartner, pendingCentsByPartner } from '@/lib/payouts'
-import { deletePartnerAction, resendWelcomeEmailAction, forcePayoutAction } from '@/app/actions/admin'
+import {
+  deletePartnerAction,
+  resendWelcomeEmailAction,
+  forcePayoutAction,
+  linkPartnerStripeAccountAction,
+} from '@/app/actions/admin'
+import { inputClass } from '@/components/elements/input'
 import { Container } from '@/components/elements/container'
 import { Card } from '@/components/elements/card'
 import { Eyebrow } from '@/components/elements/eyebrow'
@@ -31,6 +37,10 @@ const payoutCopy: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
   nothing: { text: 'No available balance to pay out.', tone: 'warn' },
   'no-account': { text: 'Partner has no connected Stripe account for payouts.', tone: 'warn' },
   'transfer-failed': { text: 'Stripe transfer failed — the account may not be payout-enabled.', tone: 'warn' },
+  linked: { text: 'Stripe account linked to this partner.', tone: 'ok' },
+  'bad-account': { text: 'Enter a valid Stripe account id (starts with “acct_”).', tone: 'warn' },
+  'account-taken': { text: 'That Stripe account is already linked to a different partner.', tone: 'warn' },
+  'account-missing': { text: 'That account could not be found on our Stripe platform.', tone: 'warn' },
 }
 
 export default async function AdminPartnerEditPage({
@@ -144,6 +154,26 @@ export default async function AdminPartnerEditPage({
               Force payout
             </Button>
           </form>
+
+          {/* Admin-only: partners can't link an acct_ id themselves (prevents misdirected payouts). */}
+          <div className="flex flex-col gap-2 border-t border-olive-950/10 pt-4 dark:border-white/10">
+            <p className="text-sm text-olive-600 dark:text-olive-500">
+              Connected account:{' '}
+              <span className="font-mono text-olive-950 dark:text-white">{partner.stripeAccountId ?? 'none'}</span>.
+              Link an existing Stripe Connect account (created before this app) — only after confirming it belongs to
+              this partner.
+            </p>
+            <form action={linkPartnerStripeAccountAction} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+              <input type="hidden" name="partnerId" value={partner.id} />
+              <label className="flex flex-1 flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white">
+                Stripe account ID
+                <input name="accountId" required placeholder="acct_1A2b3C..." className={inputClass} />
+              </label>
+              <SoftButton type="submit" className="w-fit">
+                {partner.stripeAccountId ? 'Replace account' : 'Link account'}
+              </SoftButton>
+            </form>
+          </div>
         </Card>
 
         {/* Their properties */}

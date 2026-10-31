@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
-import { getSession } from '@/lib/session'
+import { sessionWithRole } from '@/lib/dal'
 
 /**
  * Issues short-lived client upload tokens for property images, but only to a
@@ -15,8 +15,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       body,
       request,
       onBeforeGenerateToken: async () => {
-        const session = await getSession()
-        if (session?.role !== 'partner' && session?.role !== 'admin') {
+        const session = await sessionWithRole('partner', 'admin')
+        if (!session) {
           throw new Error('Unauthorized')
         }
         return {
@@ -31,6 +31,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     })
     return NextResponse.json(json)
   } catch (error) {
-    return NextResponse.json({ error: (error as Error).message }, { status: 400 })
+    console.error('[partners/upload] handleUpload failed:', error)
+    return NextResponse.json({ error: 'Upload could not be authorized.' }, { status: 400 })
   }
 }

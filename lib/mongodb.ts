@@ -8,8 +8,11 @@ import { MongoClient, type Db } from 'mongodb'
  * The client is created lazily on first `getDb()` call (not at import time) so
  * that `next build` and statically-rendered routes never open a connection.
  *
- * In development we cache the connection promise on `globalThis` so hot-reloads
- * don't open a new connection on every change.
+ * The connection promise is cached on `globalThis` in EVERY environment: in
+ * development so hot-reloads don't reconnect, and in production so a warm
+ * serverless instance reuses one pooled client instead of opening (and leaking)
+ * a new pool on every `getDb()` call. A failed connect clears the cache so the
+ * next call retries instead of re-throwing a stale rejection forever.
  */
 
 const dbName = process.env.MONGODB_DATABASE ?? 'edyns'
@@ -25,12 +28,11 @@ function getClientPromise(): Promise<MongoClient> {
     throw new Error('Missing MONGODB_URI environment variable')
   }
 
-  if (process.env.NODE_ENV === 'development') {
-    global._mongoClientPromise ??= new MongoClient(uri).connect()
-    return global._mongoClientPromise
-  }
-
-  return new MongoClient(uri).connect()
+  global._mongoClientPromise ??= new MongoClient(uri).connect().catch((err) => {
+    global._mongoClientPromise = undefined
+    throw err
+  })
+  return global._mongoClientPromise
 }
 
 export async function getDb(): Promise<Db> {

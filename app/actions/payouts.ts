@@ -44,30 +44,10 @@ export async function startConnectOnboarding(): Promise<void> {
   redirect(link.url)
 }
 
-export type ManualConnectState = { error?: string; ok?: boolean } | undefined
-
-/** Attach an existing connected account (created before this app) by its acct_ id. */
-export async function saveManualConnectAccount(
-  _prev: ManualConnectState,
-  formData: FormData,
-): Promise<ManualConnectState> {
-  const session = await requireRole('partner', '/partners/login')
-  const accountId = String(formData.get('accountId') ?? '').trim()
-
-  if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) {
-    return { error: 'Enter a valid Stripe account id (starts with “acct_”).' }
-  }
-
-  try {
-    await getStripe().accounts.retrieve(accountId)
-  } catch {
-    return { error: 'That account could not be found on our Stripe platform.' }
-  }
-
-  await setStripeAccountId(session.sub, accountId)
-  revalidatePath('/partners/payouts')
-  return { ok: true }
-}
+// Linking an existing acct_ id by hand is admin-only (see
+// linkPartnerStripeAccountAction in app/actions/admin.ts). Partners can only
+// create their own account through Stripe-hosted onboarding above, so they can't
+// point payouts (or webhook transfer attribution) at someone else's account.
 
 export async function savePayoutFrequency(formData: FormData): Promise<void> {
   const session = await requireRole('partner', '/partners/login')

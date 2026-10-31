@@ -141,7 +141,7 @@ export async function sendTenantInviteEmail(input: {
 
 /**
  * Approval email: the tenant is approved and must finish income verification
- * (connect a bank via Plaid OR upload their most recent paystub) before we set
+ * (connect a bank via Plaid — the only self-service path) before we set
  * up rent collection.
  */
 export async function sendApprovalEmail(input: { to: string; name: string }): Promise<void> {
@@ -150,11 +150,8 @@ export async function sendApprovalEmail(input: { to: string; name: string }): Pr
     <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
       <h2 style="font-weight:600">You’re approved, ${escapeHtml(input.name)} 🎉</h2>
       <p>Welcome to edynsgate. There’s <strong>one last step</strong> before you can move in: verify your income.</p>
-      <p>Sign in to your tenant portal and either:</p>
-      <ul>
-        <li><strong>Connect your bank with Plaid</strong> (fastest), or</li>
-        <li><strong>Upload your most recent paystub</strong>.</li>
-      </ul>
+      <p>Sign in to your tenant portal and <strong>connect your bank with Plaid</strong> so we can confirm your income.
+      If you have trouble connecting, just reply to this email and our team will help.</p>
       <p>Once we’ve confirmed your income, our team will set up your rent collection.</p>
       <p><a href="${portalUrl}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Finish income verification</a></p>
     </div>`
@@ -177,7 +174,7 @@ export async function sendVerificationResetEmail(input: { to: string; name: stri
       <p>Sign in to your tenant portal and redo the steps that apply to you:</p>
       <ul>
         <li><strong>Identity verification</strong> (government ID + selfie via Stripe)</li>
-        <li><strong>Income verification</strong> — connect your bank with Plaid, or upload your most recent paystub</li>
+        <li><strong>Income verification</strong> — connect your bank with Plaid</li>
       </ul>
       <p><a href="${portalUrl}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Restart verification</a></p>
       <p style="color:#6b6b60;font-size:13px">If you get stuck again, just reply to this email and we’ll help.</p>

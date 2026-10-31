@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { sessionWithRole } from '@/lib/dal'
 import { getTenantByUserId, setPlaidUserToken } from '@/lib/tenants'
 import { createUserToken, createIncomeLinkToken } from '@/lib/plaid'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
@@ -8,8 +8,8 @@ import { rateLimit, getClientIp } from '@/lib/ratelimit'
  *  Body may request `{ source: 'bank' }` so an employee whose payroll provider
  *  isn't supported by Plaid can fall back to verifying via bank deposits. */
 export async function POST(req: Request): Promise<NextResponse> {
-  const session = await getSession()
-  if (session?.role !== 'tenant') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await sessionWithRole('tenant')
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json().catch(() => null)
   const requestedBank = body?.source === 'bank'
@@ -25,18 +25,20 @@ export async function POST(req: Request): Promise<NextResponse> {
   const tenant = await getTenantByUserId(session.sub)
   if (!tenant) return NextResponse.json({ error: 'No application found' }, { status: 400 })
 
+  // Plaid is the only self-service income path (no tenant paystub uploads), so
+  // when it's down we ask the tenant to retry or contact us — never to upload.
   const unavailable =
-    'Bank income verification is temporarily unavailable. Please upload your most recent paystub instead — our team will verify it.'
+    'Bank income verification is temporarily unavailable. Please try again later, or reply to your approval email and our team will help.'
 
   try {
     let userToken = tenant.plaidUserToken
     if (!userToken) {
       const created = await createUserToken(session.sub)
       // The Plaid account must issue a user_token for income; if it doesn't
-      // (provisioning not complete), degrade gracefully to the paystub fallback
-      // instead of a hard 500 — and don't persist an empty token.
+      // (provisioning not complete), return a friendly 503 instead of a hard
+      // 500 — and don't persist an empty token.
       if (!created.userToken) {
-        return NextResponse.json({ error: unavailable, fallback: 'paystub' }, { status: 503 })
+        return NextResponse.json({ error: unavailable }, { status: 503 })
       }
       userToken = created.userToken
       await setPlaidUserToken(session.sub, created.userToken, created.userId)
@@ -46,7 +48,8 @@ export async function POST(req: Request): Promise<NextResponse> {
     const source = tenant.employment.selfEmployed || requestedBank ? 'bank' : 'payroll'
     const linkToken = await createIncomeLinkToken(userToken, session.sub, source)
     return NextResponse.json({ link_token: linkToken })
-  } catch {
-    return NextResponse.json({ error: unavailable, fallback: 'paystub' }, { status: 503 })
+  } catch (err) {
+    console.error('[plaid/link-token] failed:', err)
+    return NextResponse.json({ error: unavailable }, { status: 503 })
   }
 }

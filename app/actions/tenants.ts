@@ -11,7 +11,6 @@ import {
   getTenantByUserId,
   attachStripeCustomer,
   setFeeSession,
-  setPaystub,
   setEmploymentType,
   type Person,
 } from '@/lib/tenants'
@@ -234,20 +233,8 @@ export async function resumeApplicationPayment(): Promise<void> {
   redirect(url)
 }
 
-/**
- * Save a manually uploaded paystub as an alternative to Plaid income verification.
- * Only available after the application is approved (the income-verification step).
- */
-export async function savePaystub(url: string): Promise<{ error?: string } | void> {
-  const session = await requireRole('tenant', '/tenants/login')
-  const tenant = await getTenantByUserId(session.sub)
-  if (!tenant) return { error: 'No application on file.' }
-  if (tenant.status !== 'approved') return { error: 'Income verification unlocks once your application is approved.' }
-  if (!/^https?:\/\/\S+$/.test(url)) return { error: 'That file could not be saved. Please try again.' }
-
-  await setPaystub(session.sub, url)
-  revalidatePath('/tenants')
-}
+// Tenants verify income through Plaid only — there is no tenant paystub upload.
+// Admins can attach a paystub as a last resort (uploadPaystubAction in admin.ts).
 
 /**
  * Set whether the tenant is self-employed (verifies via bank deposits, hours

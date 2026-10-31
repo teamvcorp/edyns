@@ -6,6 +6,7 @@ import { requireRole } from '@/lib/dal'
 import { findPartnerById } from '@/lib/users'
 import { getStripe, withProcessingFee } from '@/lib/stripe'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+import { isBlobImageUrl } from '@/lib/property-input'
 import {
   sendProjectInvoiceEmail,
   sendFinalInvoiceEmail,
@@ -57,12 +58,16 @@ function parseLineItems(raw: string): LineItem[] {
   }
 }
 
-/** Photo URLs arrive as a JSON array of Vercel Blob URLs. */
+/**
+ * Photo URLs arrive as a JSON array from the uploader. Only files on OUR Vercel
+ * Blob store are accepted — never arbitrary links — since these URLs are later
+ * embedded in emails and pages shown to recipients.
+ */
 function parseUrls(raw: string): string[] {
   try {
     const arr = JSON.parse(raw)
     if (!Array.isArray(arr)) return []
-    return arr.filter((u): u is string => typeof u === 'string' && /^https?:\/\//.test(u))
+    return arr.filter(isBlobImageUrl).slice(0, 20)
   } catch {
     return []
   }
@@ -248,7 +253,7 @@ export async function markCompletedAction(formData: FormData): Promise<void> {
   await requireRole('admin', '/admin/login')
   const id = String(formData.get('id') ?? '')
   const finishedPhotoUrl = String(formData.get('finishedPhotoUrl') ?? '').trim()
-  if (!/^https?:\/\//.test(finishedPhotoUrl)) {
+  if (!isBlobImageUrl(finishedPhotoUrl)) {
     redirect(`/admin/invoices/${id}?error=photo`)
   }
 
@@ -272,6 +277,20 @@ export async function markCompletedAction(formData: FormData): Promise<void> {
 
 // ---- Public (token-based, no login) ----
 
+/** Max length of the public decline note (unauthenticated input). */
+const MAX_NOTE_CHARS = 1000
+
+/**
+ * Read the public invoice token from a form. Tokens are random hex we generate
+ * (lib/invoices.ts); anything else is rejected before it reaches the database
+ * or gets interpolated into a redirect path.
+ */
+function readToken(formData: FormData): string {
+  const token = String(formData.get('token') ?? '')
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(token)) redirect('/')
+  return token
+}
+
 async function throttle(token: string): Promise<boolean> {
   const ip = await getClientIp()
   const { allowed } = await rateLimit({ key: `invoice:${ip}:${token}`, limit: TOKEN_LIMIT, windowMs: TOKEN_WINDOW_MS })
@@ -279,7 +298,7 @@ async function throttle(token: string): Promise<boolean> {
 }
 
 export async function acceptInvoiceByToken(formData: FormData): Promise<void> {
-  const token = String(formData.get('token') ?? '')
+  const token = readToken(formData)
   if (!(await throttle(token))) redirect(`/invoices/${token}?error=throttled`)
 
   const invoice = await markInvoiceAccepted(token)
@@ -295,10 +314,10 @@ export async function acceptInvoiceByToken(formData: FormData): Promise<void> {
 }
 
 export async function declineInvoiceByToken(formData: FormData): Promise<void> {
-  const token = String(formData.get('token') ?? '')
+  const token = readToken(formData)
   if (!(await throttle(token))) redirect(`/invoices/${token}?error=throttled`)
 
-  const note = String(formData.get('note') ?? '')
+  const note = String(formData.get('note') ?? '').slice(0, MAX_NOTE_CHARS)
   await markInvoiceDeclined(token, note)
   revalidatePath(`/invoices/${token}`)
   redirect(`/invoices/${token}?declined=1`)
@@ -312,7 +331,7 @@ export async function declineInvoiceByToken(formData: FormData): Promise<void> {
  *  - balance: whatever remains
  */
 export async function startInvoicePaymentByToken(formData: FormData): Promise<void> {
-  const token = String(formData.get('token') ?? '')
+  const token = readToken(formData)
   if (!(await throttle(token))) redirect(`/invoices/${token}?error=throttled`)
 
   const phase = String(formData.get('phase') ?? '') as PaymentPhase

@@ -13,7 +13,6 @@ import { Text } from '@/components/elements/text'
 import { Card } from '@/components/elements/card'
 import { Breadcrumbs } from '@/components/elements/breadcrumbs'
 import { Button, SoftButton } from '@/components/elements/button'
-import { ManualConnectForm } from '@/components/partners/manual-connect-form'
 import { formatCurrency } from '@/lib/format'
 
 export const metadata: Metadata = { title: 'Equity & payouts' }
@@ -160,20 +159,13 @@ export default async function PartnerPayoutsPage({
             <>
               <Text className="text-sm/6">
                 <p>
-                  To receive equity payouts you need a Stripe connected account on our platform. Set one up, or link an
-                  account you created previously.
+                  To receive equity payouts you need a Stripe connected account on our platform. Set one up below.
+                  Already have one from before? Contact our team and an admin will link it for you.
                 </p>
               </Text>
               <form action={startConnectOnboarding}>
                 <Button type="submit">{hasAccount ? 'Finish Stripe setup' : 'Set up payouts with Stripe'}</Button>
               </form>
-
-              <div className="border-t border-olive-950/10 pt-4 dark:border-white/10">
-                <p className="mb-2 text-sm font-medium text-olive-700 dark:text-olive-400">
-                  Already have a connected account?
-                </p>
-                <ManualConnectForm />
-              </div>
             </>
           )}
         </Card>

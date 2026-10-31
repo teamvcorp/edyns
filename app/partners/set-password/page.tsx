@@ -6,7 +6,8 @@ import { requireRole } from '@/lib/dal'
 export const metadata: Metadata = { title: 'Set a new password' }
 
 export default async function PartnerSetPasswordPage() {
-  const session = await requireRole('partner', '/partners/login')
+  // The one page temp-password users ARE allowed to reach.
+  const session = await requireRole('partner', '/partners/login', { allowMustReset: true })
 
   return (
     <AuthShell

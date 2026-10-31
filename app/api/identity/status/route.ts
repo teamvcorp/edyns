@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server'
-import { getSession } from '@/lib/session'
+import { sessionWithRole } from '@/lib/dal'
 import { getStripe } from '@/lib/stripe'
 import { getTenantByUserId, markIdentityVerified } from '@/lib/tenants'
 
 /** Called when the tenant returns from Stripe Identity — gives instant feedback. */
 export async function GET(): Promise<NextResponse> {
-  const session = await getSession()
-  if (session?.role !== 'tenant') return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const session = await sessionWithRole('tenant')
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const tenant = await getTenantByUserId(session.sub)
   if (tenant?.identityVerified) return NextResponse.json({ status: 'verified', identityVerified: true })
@@ -24,6 +24,7 @@ export async function GET(): Promise<NextResponse> {
     }
     return NextResponse.json({ status: vs.status, identityVerified: false })
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : 'Stripe error' }, { status: 502 })
+    console.error('[identity/status] Stripe error:', err)
+    return NextResponse.json({ error: 'Could not check verification status.' }, { status: 502 })
   }
 }
