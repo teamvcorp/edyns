@@ -25,6 +25,7 @@ export function IdentityVerifyButton({ returning = false }: { returning?: boolea
       if (!res.ok || !data.url) throw new Error(data.error || 'Could not start verification.')
       window.location.href = data.url
     } catch (e) {
+      console.error('[identity-verify] start failed:', e)
       setError(e instanceof Error ? e.message : 'Could not start verification.')
       setBusy(false)
     }

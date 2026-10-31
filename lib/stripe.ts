@@ -2,6 +2,7 @@ import 'server-only'
 
 import Stripe from 'stripe'
 import type { BillingFrequency, BillingStatus } from './tenants'
+import { logError } from './log'
 
 let client: Stripe | null = null
 
@@ -90,7 +91,8 @@ export async function fetchCustomerForImport(customerId: string): Promise<Custom
   let customer: Stripe.Customer | Stripe.DeletedCustomer
   try {
     customer = await getStripe().customers.retrieve(id, { expand: ['invoice_settings.default_payment_method'] })
-  } catch {
+  } catch (err) {
+    logError('stripe/import-customer-lookup', err)
     return { ok: false, error: 'No Stripe customer found for that id.' }
   }
   if (customer.deleted) return { ok: false, error: 'That Stripe customer was deleted in Stripe.' }
@@ -103,7 +105,8 @@ export async function fetchCustomerForImport(customerId: string): Promise<Custom
     try {
       const list = await getStripe().customers.listPaymentMethods(id, { limit: 1 })
       pm = list.data[0] ?? null
-    } catch {
+    } catch (err) {
+      logError('stripe/import-payment-methods', err)
       pm = null
     }
   }
@@ -197,7 +200,8 @@ export async function fetchSubscriptionForImport(subscriptionId: string): Promis
   let sub: Stripe.Subscription
   try {
     sub = await getStripe().subscriptions.retrieve(id, { expand: ['customer', 'items.data.price'] })
-  } catch {
+  } catch (err) {
+    logError('stripe/import-subscription-lookup', err)
     return { ok: false, error: 'No Stripe subscription found for that id.' }
   }
 

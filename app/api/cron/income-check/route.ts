@@ -8,6 +8,7 @@ import { readIncome } from '@/lib/income'
 import { getStripe } from '@/lib/stripe'
 import { sendSecurityAlert } from '@/lib/email'
 import { safeEqual } from '@/lib/crypto'
+import { logError } from '@/lib/log'
 
 /**
  * Monthly income / job-loss check. Runs daily (Vercel Cron) and processes
@@ -44,7 +45,8 @@ export async function GET(request: Request): Promise<Response> {
         claimedHourlyRate: tenant.employment.claimedHourlyRate,
       })
       hasRecentIncome = reading.hasRecentIncome
-    } catch {
+    } catch (err) {
+      logError('cron/income-check/read-income', err, { tenantId: tenant.id })
       // Couldn't reach Plaid / item needs re-auth → treat as needs-review.
       hasRecentIncome = false
     }
@@ -63,7 +65,8 @@ export async function GET(request: Request): Promise<Response> {
         await getStripe().subscriptions.update(tenant.billing.stripeSubscriptionId, {
           pause_collection: { behavior: 'void' },
         })
-      } catch {
+      } catch (err) {
+        logError('cron/income-check/pause-subscription', err, { tenantId: tenant.id })
         /* still flag below even if the pause call fails */
       }
       await pauseBillingForReview(tenant.id, 'Monthly income check found no recent income — possible job loss.')
@@ -72,7 +75,8 @@ export async function GET(request: Request): Promise<Response> {
           subject: 'Tenant rent paused — no recent income',
           body: `Rent paused for ${tenant.name} (${tenant.email}). The monthly income check found no recent income (possible job loss or a bank connection needing re-auth). Reconfirm before resuming.`,
         })
-      } catch {
+      } catch (err) {
+        logError('cron/income-check/alert', err, { tenantId: tenant.id })
         /* best-effort */
       }
       paused++

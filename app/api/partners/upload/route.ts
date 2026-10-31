@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
 import { sessionWithRole } from '@/lib/dal'
+import { logError } from '@/lib/log'
 
 /**
  * Issues short-lived client upload tokens for property images, but only to a
@@ -31,7 +32,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     })
     return NextResponse.json(json)
   } catch (error) {
-    console.error('[partners/upload] handleUpload failed:', error)
+    logError('partners/upload', error)
     return NextResponse.json({ error: 'Upload could not be authorized.' }, { status: 400 })
   }
 }

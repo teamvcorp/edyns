@@ -11,6 +11,7 @@ import { recordRentEquity } from '@/lib/equity'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
 import { markPayoutPaid, createPaidPayout, markPayoutReversedByTransfer } from '@/lib/payouts'
 import { findPartnerByStripeAccountId } from '@/lib/users'
+import { logError, logWarn } from '@/lib/log'
 
 /** Default partner equity share when a property hasn't set one. */
 const DEFAULT_EQUITY_SHARE_PERCENT = 10
@@ -78,6 +79,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     event = getStripe().webhooks.constructEvent(payload, signature, secret)
   } catch {
+    logWarn('stripe/webhook', 'invalid Stripe signature')
     return new Response('Invalid signature', { status: 400 })
   }
 
@@ -117,7 +119,8 @@ export async function POST(request: Request): Promise<Response> {
       await setBillingStatusBySubscription(subId, 'active')
       try {
         await recordRentEquityForInvoice(invoice, subId)
-      } catch {
+      } catch (err) {
+        logError('stripe/webhook/rent-equity', err, { invoiceId: invoice.id })
         /* equity crediting is best-effort — never fail the webhook over it */
       }
     }
@@ -153,14 +156,16 @@ export async function POST(request: Request): Promise<Response> {
         }
         // No partner match → not a partner payout; nothing to record.
       }
-    } catch {
+    } catch (err) {
+      logError('stripe/webhook/transfer-created', err, { transferId: transfer.id })
       /* accounting is best-effort — never fail the webhook over it */
     }
   } else if (event.type === 'transfer.reversed') {
     // Full reversal: flip the debit so the partner's available balance restores.
     try {
       await markPayoutReversedByTransfer((event.data.object as Stripe.Transfer).id)
-    } catch {
+    } catch (err) {
+      logError('stripe/webhook/transfer-reversed', err)
       /* best-effort */
     }
   }

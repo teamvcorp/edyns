@@ -18,6 +18,7 @@ import { getStripe, applicationTotalCents } from '@/lib/stripe'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 import { getValidInviteByToken, claimInvite, releaseInvite, linkInviteToTenant } from '@/lib/invites'
 import { getPropertyById } from '@/lib/properties'
+import { logError, logWarn } from '@/lib/log'
 
 export type TenantEnrollState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string }
@@ -46,6 +47,7 @@ function parsePeople(json: string): Person[] {
       .map((p) => ({ name: String(p.name).trim(), dob: String(p.dob).trim() }))
       .filter((p) => p.name && p.dob)
   } catch {
+    logWarn('tenants', 'malformed people JSON')
     return []
   }
 }
@@ -198,6 +200,7 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
 
     checkoutUrl = await startFeeCheckout({ userId: user.id, email: values.email, customerId: customer.id })
   } catch (e) {
+    logError('tenants/enroll', e)
     // Failed before the application existed → let them retry with the same
     // link. Once the application exists the invite stays consumed (they can
     // sign in and resume payment from the portal).

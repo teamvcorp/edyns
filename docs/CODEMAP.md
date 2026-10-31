@@ -21,6 +21,7 @@ All `lib/*.ts` are `server-only` **except** `format.ts` and `tiers.ts` (safe in 
 | Session cookie | `createSession`, `getSession`, `deleteSession`, `decrypt` (proxy) | `lib/session.ts` |
 | Encrypt a secret at rest | `encryptString` / `decryptString`, `encryptBuffer` / `decryptBuffer` (AES-256-GCM, `EE_ENCRYPTION_KEY`) | `lib/crypto.ts` |
 | Compare secrets | `safeEqual(a, b)` (constant-time) | `lib/crypto.ts` |
+| **Log a caught error** | `logError(ctx, err, {ids})` for failures, `logWarn(ctx, msg, {ids})` for expected rejections. Strips Plaid secrets / Mongo PII. **Never `console.error(err)` in server code; never an empty `catch {}`.** Pass ids, not emails/names. | `lib/log.ts` |
 | Paystubs (admin-only, encrypted in Mongo, no URL) | `savePaystubFile`, `readPaystubFile`, `deletePaystubFile`, `sniffPaystubType`; viewer route `app/admin/tenants/[id]/paystub` | `lib/paystubs.ts` |
 | Throttle | `rateLimit({key,limit,windowMs})`, `getClientIp()` | `lib/ratelimit.ts` |
 | Validate a Blob URL | `isBlobImageUrl(u)` (https + `*.public.blob.vercel-storage.com`) | `lib/property-input.ts:32` |
@@ -78,7 +79,6 @@ rely on the private `undoMoveIn` helper's gate — keep an inline gate if refact
 | D15 | Available balance (equity − paid − pending) ×4 | `availableCentsByPartner()` in `lib/payouts.ts` |
 | D16 | Default equity share `10` ×4 | export `DEFAULT_EQUITY_SHARE_PERCENT` from `lib/equity.ts` |
 | D17 | Stripe customer create + attach ×2 (`tenants.ts`) | `ensureStripeCustomer()` |
-| D19 | Best-effort `try{send}catch{}` ×~15, **errors never logged** | `trySend()` that logs |
 | D21 | `PropertyOption`/`PartnerOption` types with different shapes | shared types file |
 | D22 | `requireRole('admin','/admin/login')` ×38 | `requireAdmin()` in `lib/dal.ts` |
 | — | ~120 `ObjectId.isValid` + `new ObjectId` pairs; some userId writes skip the check | `toObjectId(id) → ObjectId \| null` |
@@ -100,14 +100,13 @@ Inconsistent action return shapes (`{error}`, `{error,ok}`, `{errors,values,mess
 
 Fixed 2026-10-30: Mongo client leak, public paystubs, unvalidated upload URLs, partner acct_ linking, session revocation,
 admin/cron timing-safe compares, `mustReset` in DAL, rate-limit index + logging, raw provider errors in API responses,
-invoice token/note validation, self-employed input iOS zoom.
+invoice token/note validation, self-employed input iOS zoom. Every caught error now logged via `lib/log.ts` (client components log to the browser console).
 
 Still open:
 
 | | Finding | Where | Fix |
 |---|---|---|---|
 | 🟠 | Admin = single shared password, no MFA | `app/actions/auth.ts` | Per-admin accounts + MFA (larger project) |
-| 🟡 | ~25 silent `catch {}` blocks in actions (email/Stripe failures not logged) | app/actions | Shared `trySend()` that logs (D19) |
 | 🟡 | Legacy tenant paystubs still on public Vercel Blob | `tenants.paystub.url` records | Admin re-uploads, then delete old blobs in Vercel dashboard |
 | 🟡 | Pre-existing lint errors: setState in effect | `components/tenants/plaid-verify-button.tsx:51,76`, `plaid-oauth-return.tsx:22` | Refactor effects |
 

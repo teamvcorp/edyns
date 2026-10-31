@@ -12,6 +12,7 @@ import { exchangePublicToken } from '@/lib/plaid'
 import { readIncome } from '@/lib/income'
 import { encryptString } from '@/lib/crypto'
 import { sendSecurityAlert } from '@/lib/email'
+import { logError } from '@/lib/log'
 
 export type PlaidResult = { ok?: boolean; error?: string }
 
@@ -34,7 +35,8 @@ export async function completePlaidLink(publicToken: string): Promise<PlaidResul
         subject: 'Tenant blocked for excessive bank linking',
         body: `Tenant ${tenant.name} (${tenant.email}) exceeded the bank-link cap with ${linkCount} attempts and was blocked pending review.`,
       })
-    } catch {
+    } catch (err) {
+      logError('plaid/link-cap-alert', err)
       /* alert is best-effort */
     }
     return { error: 'For your security, bank linking is paused on this account. Our team will reach out.' }
@@ -58,7 +60,8 @@ export async function completePlaidLink(publicToken: string): Promise<PlaidResul
       verifiedWeeklyHours: reading.weeklyHours,
       lastPayDate: reading.lastPayDate,
     })
-  } catch {
+  } catch (err) {
+    logError('plaid/complete-link', err)
     return { error: 'Verification failed. Please try again.' }
   }
 
@@ -70,7 +73,8 @@ export async function completePlaidLink(publicToken: string): Promise<PlaidResul
         subject: 'Tenant flagged: high bank-link velocity',
         body: `Tenant ${tenant.name} (${tenant.email}) has linked banks ${linkCount} times and was flagged for review.`,
       })
-    } catch {
+    } catch (err) {
+      logError('plaid/velocity-alert', err)
       /* alert is best-effort */
     }
   }

@@ -12,6 +12,7 @@ import {
 } from '@/lib/users'
 import { totalEquityCentsByPartner } from '@/lib/equity'
 import { totalPaidCentsByPartner, pendingCentsByPartner, hasPendingRequest, createPayoutRequest } from '@/lib/payouts'
+import { logError } from '@/lib/log'
 
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
 const FREQUENCIES: PayoutFrequency[] = ['manual', 'daily', 'weekly', 'monthly']
@@ -64,7 +65,8 @@ export async function savePayoutFrequency(formData: FormData): Promise<void> {
       await getStripe().accounts.update(partner.stripeAccountId, {
         settings: { payouts: { schedule: { interval: value } } },
       })
-    } catch {
+    } catch (err) {
+      logError('payouts/schedule-update', err)
       /* schedule controlled by the connected account; preference still saved on our side */
     }
   }

@@ -3,6 +3,7 @@ import 'server-only'
 import { ObjectId, type Collection } from 'mongodb'
 import { randomUUID } from 'node:crypto'
 import { getDb } from './mongodb'
+import { logWarn } from './log'
 
 /** How a rent payment reached us: an automatic Stripe charge or recorded cash. */
 export type EquitySource = 'stripe' | 'cash'
@@ -105,6 +106,8 @@ export async function recordRentEquity(input: {
     if (!(err && typeof err === 'object' && 'code' in err && (err as { code?: number }).code === 11000)) {
       throw err
     }
+    // Expected on webhook retries — note it so double-delivery is visible in logs.
+    logWarn('equity', 'duplicate rent-equity entry ignored (already recorded)', { ref })
   }
 }
 

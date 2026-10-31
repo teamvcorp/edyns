@@ -34,11 +34,12 @@ export function PlaidVerifyButton({ selfEmployed = false }: { selfEmployed?: boo
       setToken(d.link_token)
       try {
         localStorage.setItem('plaid_link_token', d.link_token)
-      } catch {
-        /* storage may be unavailable */
+      } catch (e) {
+        console.warn('[plaid-verify] localStorage unavailable:', e)
       }
       return true
-    } catch {
+    } catch (e) {
+      console.error('[plaid-verify] link-token request failed:', e)
       setError('Could not start verification.')
       return false
     } finally {
@@ -55,8 +56,8 @@ export function PlaidVerifyButton({ selfEmployed = false }: { selfEmployed?: boo
     (publicToken: string) => {
       try {
         localStorage.removeItem('plaid_link_token')
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn('[plaid-verify] localStorage unavailable:', e)
       }
       startTransition(async () => {
         const res = await completePlaidLink(publicToken)

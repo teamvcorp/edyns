@@ -6,6 +6,7 @@ import { getCurrentSession } from '@/lib/dal'
 import { verifyCredentials, setUserPassword } from '@/lib/users'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 import { safeEqual } from '@/lib/crypto'
+import { logWarn } from '@/lib/log'
 
 export type AuthState = { error?: string } | undefined
 export type SetPasswordState = { error?: string } | undefined
@@ -70,7 +71,7 @@ export async function loginAdmin(_prev: AuthState, formData: FormData): Promise<
 
   // Constant-time compare so response timing can't reveal how close a guess was.
   if (!password || !safeEqual(password, expected)) {
-    console.warn(`[auth] failed admin login from ${ip}`)
+    logWarn('auth', 'failed admin login', { ip })
     return { error: 'Incorrect password.' }
   }
 

@@ -2,6 +2,7 @@ import 'server-only'
 
 import { getStripe, invoiceSubscriptionId } from './stripe'
 import { listTenants, type BillingFrequency, type BillingStatus } from './tenants'
+import { logError } from './log'
 
 /** Months-worth of drafts per billing cycle, for normalizing to monthly income. */
 const MONTHLY_FACTOR: Record<BillingFrequency, number> = {
@@ -143,7 +144,8 @@ export async function getRevenueOverview(): Promise<RevenueOverview> {
       // draft/void invoices are noise here — skip them.
     }
     payments.sort((a, b) => b.at.getTime() - a.at.getTime())
-  } catch {
+  } catch (err) {
+    logError('revenue/stripe', err)
     stripeOk = false
   }
 

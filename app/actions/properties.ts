@@ -9,6 +9,7 @@ import { listEquityEntriesByProperty } from '@/lib/equity'
 import { findPartnerById } from '@/lib/users'
 import { sendEquityReportEmail } from '@/lib/email'
 import { formatAddress } from '@/lib/format'
+import { logError } from '@/lib/log'
 
 export type PropertyFormState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string }
@@ -67,7 +68,8 @@ export async function emailEquityReportAction(formData: FormData): Promise<void>
       ytdCents,
       lifetimeCents,
     })
-  } catch {
+  } catch (err) {
+    logError('properties/equity-report-email', err)
     sent = false
   }
   redirect(`/partners/properties?report=${sent ? 'sent' : 'failed'}`)

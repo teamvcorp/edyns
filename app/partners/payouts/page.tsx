@@ -18,6 +18,7 @@ import { formatCurrency } from '@/lib/format'
 export const metadata: Metadata = { title: 'Equity & payouts' }
 
 import { inputClassInline as inputClass } from '@/components/elements/input'
+import { logError } from '@/lib/log'
 
 const banner: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
   requested: { text: 'Payout request submitted — an admin will review and approve it.', tone: 'ok' },
@@ -52,7 +53,8 @@ export default async function PartnerPayoutsPage({
   if (partner?.stripeAccountId) {
     try {
       account = await getStripe().accounts.retrieve(partner.stripeAccountId)
-    } catch {
+    } catch (err) {
+      logError('partners/payouts/account-retrieve', err)
       account = null
     }
   }

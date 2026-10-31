@@ -27,8 +27,8 @@ export function PlaidOAuthReturn() {
     (publicToken: string) => {
       try {
         localStorage.removeItem('plaid_link_token')
-      } catch {
-        /* ignore */
+      } catch (e) {
+        console.warn('[plaid-oauth-return] localStorage unavailable:', e)
       }
       startTransition(async () => {
         const res = await completePlaidLink(publicToken)

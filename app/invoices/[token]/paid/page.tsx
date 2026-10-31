@@ -7,6 +7,7 @@ import { Text } from '@/components/elements/text'
 import { ButtonLink } from '@/components/elements/button'
 import { getStripe } from '@/lib/stripe'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
+import { logError } from '@/lib/log'
 
 export const metadata: Metadata = { title: 'Payment received', robots: { index: false } }
 
@@ -41,7 +42,8 @@ export default async function InvoicePaidPage({
         heading = 'Payment processing'
         body = 'Your bank payment is processing and will be confirmed shortly. Work begins once it clears.'
       }
-    } catch {
+    } catch (err) {
+      logError('invoices/paid-page', err)
       heading = 'Thanks'
       body = 'We’re confirming your payment. This can take a moment for bank transfers.'
     }

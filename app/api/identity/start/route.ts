@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { sessionWithRole } from '@/lib/dal'
 import { getStripe } from '@/lib/stripe'
 import { setIdentitySession } from '@/lib/tenants'
+import { logError } from '@/lib/log'
 
 const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
@@ -21,7 +22,7 @@ export async function POST(): Promise<NextResponse> {
     return NextResponse.json({ url: vs.url })
   } catch (err) {
     // Log the real cause server-side; never echo provider errors to the browser.
-    console.error('[identity/start] Stripe error:', err)
+    logError('identity/start', err)
     return NextResponse.json({ error: 'Could not start verification. Please try again.' }, { status: 502 })
   }
 }

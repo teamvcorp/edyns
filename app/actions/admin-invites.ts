@@ -9,6 +9,7 @@ import { sendTenantInviteEmail } from '@/lib/email'
 import { rateLimit } from '@/lib/ratelimit'
 import { formatAddress } from '@/lib/format'
 import { tierLabel } from '@/lib/tiers'
+import { logError } from '@/lib/log'
 
 export type InviteState = { errors?: Record<string, string>; values?: Record<string, string>; message?: string } | undefined
 
@@ -47,7 +48,8 @@ async function emailInvite(invite: TenantInvite, token: string): Promise<boolean
       property,
     })
     return true
-  } catch {
+  } catch (err) {
+    logError('admin-invites/send', err)
     return false
   }
 }

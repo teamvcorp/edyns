@@ -40,6 +40,7 @@ export function ImageUploader({
       }
       onChange(multiple ? [...value, ...uploaded] : uploaded.slice(-1))
     } catch (e) {
+      console.error('[image-uploader] upload failed:', e)
       setError(e instanceof Error ? e.message : 'Upload failed.')
     } finally {
       setUploading(false)

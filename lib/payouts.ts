@@ -2,6 +2,7 @@ import 'server-only'
 
 import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
+import { logWarn } from './log'
 
 export type PayoutStatus = 'requested' | 'paid' | 'declined' | 'reversed'
 
@@ -105,6 +106,8 @@ export async function createPaidPayout(
     if (!(err && typeof err === 'object' && 'code' in err && (err as { code?: number }).code === 11000)) {
       throw err
     }
+    // Expected when the webhook and the admin action both record a transfer.
+    logWarn('payouts', 'duplicate paid payout ignored (already recorded)', { stripeTransferId })
   }
 }
 

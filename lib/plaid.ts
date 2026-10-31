@@ -10,6 +10,7 @@ import {
 } from 'plaid'
 import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from 'jose'
 import { createHash, timingSafeEqual } from 'node:crypto'
+import { logError, logWarn } from './log'
 
 let client: PlaidApi | null = null
 
@@ -148,7 +149,8 @@ export async function getPayrollIncome(
       periodHours !== null && weeksPerPeriod ? Math.round((periodHours / weeksPerPeriod) * 10) / 10 : null
     const lastPayDate = stub.pay_period_details?.pay_date ?? stub.pay_period_details?.end_date ?? null
     return { monthlyIncome, weeklyHours, lastPayDate }
-  } catch {
+  } catch (err) {
+    logError('plaid/payroll-income', err)
     return { monthlyIncome: null, weeklyHours: null, lastPayDate: null }
   }
 }
@@ -190,7 +192,8 @@ export async function getMonthlyIncome(userToken: string): Promise<number | null
       if (days > 0) months = Math.max(1, days / 30)
     }
     return Math.round(summary.total_amount / months)
-  } catch {
+  } catch (err) {
+    logError('plaid/monthly-income', err)
     return null
   }
 }
@@ -213,6 +216,7 @@ export async function verifyPlaidWebhook(rawBody: string, verificationHeader: st
     if (header.alg !== 'ES256' || !header.kid) return false
     kid = header.kid
   } catch {
+    logWarn('plaid/webhook-verify', 'malformed verification header')
     return false
   }
 
@@ -222,7 +226,8 @@ export async function verifyPlaidWebhook(rawBody: string, verificationHeader: st
       const res = await getPlaid().webhookVerificationKeyGet({ key_id: kid })
       jwk = res.data.key as unknown as JWK
       webhookKeyCache.set(kid, jwk)
-    } catch {
+    } catch (err) {
+      logError('plaid/webhook-key-fetch', err)
       return false
     }
   }
@@ -236,7 +241,8 @@ export async function verifyPlaidWebhook(rawBody: string, verificationHeader: st
     const a = Buffer.from(actual)
     const b = Buffer.from(expected)
     return a.length === b.length && timingSafeEqual(a, b)
-  } catch {
+  } catch (err) {
+    logError('plaid/webhook-verify', err)
     return false
   }
 }

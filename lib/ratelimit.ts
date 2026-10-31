@@ -2,6 +2,7 @@ import 'server-only'
 
 import { headers } from 'next/headers'
 import { getDb } from './mongodb'
+import { logError } from './log'
 
 /**
  * Mongo-backed fixed-window rate limiter. A counter document keyed by
@@ -47,7 +48,7 @@ export async function rateLimit(opts: { key: string; limit: number; windowMs: nu
   } catch (err) {
     // Fail open: a rate-limit backend hiccup must not lock out all users — but
     // log it, because while this fires login throttling is effectively off.
-    console.error('[ratelimit] backend error, failing open:', err)
+    logError('ratelimit', err)
     return { allowed: true, remaining: 0 }
   }
 }

@@ -58,6 +58,7 @@ import { totalEquityCentsByPartner, recordRentEquity, repricePropertyEquity } fr
 import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail, sendVerificationResetEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
+import { logError } from '@/lib/log'
 
 export type AdminActionState = { error?: string } | undefined
 
@@ -311,7 +312,8 @@ export async function approveTenantAction(_prev: AdminActionState, formData: For
   // last step before we set up rent collection. Don't fail approval on email.
   try {
     await sendApprovalEmail({ to: tenant.email, name: tenant.name })
-  } catch {
+  } catch (err) {
+    logError('admin/approval-email', err, { tenantId: tenant.id })
     /* email is best-effort */
   }
 
@@ -358,7 +360,8 @@ export async function resendWelcomeEmailAction(formData: FormData): Promise<void
       tempPassword: reset.tempPassword,
       role: reset.role,
     })
-  } catch {
+  } catch (err) {
+    logError('admin/welcome-email', err)
     sent = false
   }
   redirect(`${dest}?welcome=${sent ? 'sent' : 'failed'}`)
@@ -461,14 +464,16 @@ export async function resetTenantVerificationAction(formData: FormData): Promise
   if (tenant.stripeIdentitySessionId && !tenant.identityVerified) {
     try {
       await getStripe().identity.verificationSessions.cancel(tenant.stripeIdentitySessionId)
-    } catch {
+    } catch (err) {
+      logError('admin/reset-cancel-identity', err, { tenantId: tenant.id })
       /* only cancellable while requires_input — fine, the DB reset still clears it */
     }
   }
   if (tenant.plaidAccessTokenEnc) {
     try {
       await removePlaidItem(decryptString(tenant.plaidAccessTokenEnc))
-    } catch {
+    } catch (err) {
+      logError('admin/reset-remove-plaid-item', err, { tenantId: tenant.id })
       /* already removed at Plaid / key rotated — don't block the reset */
     }
   }
@@ -479,7 +484,8 @@ export async function resetTenantVerificationAction(formData: FormData): Promise
 
   try {
     await sendVerificationResetEmail({ to: tenant.email, name: tenant.name })
-  } catch {
+  } catch (err) {
+    logError('admin/reset-email', err, { tenantId: tenant.id })
     /* email is best-effort */
   }
 
@@ -557,7 +563,8 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
     })
     subscriptionId = subscription.id
     subActive = subscription.status === 'active' || subscription.status === 'trialing'
-  } catch {
+  } catch (err) {
+    logError('admin/start-billing', err)
     return { error: 'Stripe could not start rent collection. Check the date and the tenant’s payment method.' }
   }
 
@@ -604,7 +611,8 @@ export async function resumeTenantBillingAction(formData: FormData): Promise<voi
   if (tenant?.billing) {
     try {
       await getStripe().subscriptions.update(tenant.billing.stripeSubscriptionId, { pause_collection: '' })
-    } catch {
+    } catch (err) {
+      logError('admin/resume-billing-unpause', err)
       /* if Stripe update fails, still clear our flag; admin can retry */
     }
     const next = new Date()
@@ -695,7 +703,8 @@ export async function replaceImportedWithBillingAction(formData: FormData): Prom
   if (tenant?.billing?.imported) {
     try {
       await getStripe().subscriptions.cancel(tenant.billing.stripeSubscriptionId)
-    } catch {
+    } catch (err) {
+      logError('admin/cancel-imported-subscription', err)
       /* already canceled / missing in Stripe — clear our record regardless */
     }
     await clearBilling(id)
@@ -784,7 +793,8 @@ export async function approvePayoutAction(formData: FormData): Promise<void> {
       )
       transferId = transfer.id
     }
-  } catch {
+  } catch (err) {
+    logError('admin/approve-payout-transfer', err)
     transferId = null
   }
 
@@ -830,7 +840,7 @@ export async function linkPartnerStripeAccountAction(formData: FormData): Promis
   try {
     await getStripe().accounts.retrieve(accountId)
   } catch (err) {
-    console.error('[admin] Stripe account lookup failed:', err)
+    logError('admin/link-stripe-account', err)
     back('account-missing')
   }
 
@@ -880,7 +890,8 @@ export async function forcePayoutAction(formData: FormData): Promise<void> {
       )
       transferId = transfer.id
     }
-  } catch {
+  } catch (err) {
+    logError('admin/force-payout-transfer', err)
     transferId = null
   }
 

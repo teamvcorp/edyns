@@ -29,6 +29,7 @@ import {
   type LineItem,
   type PaymentPhase,
 } from '@/lib/invoices'
+import { logError, logWarn } from '@/lib/log'
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
@@ -54,6 +55,7 @@ function parseLineItems(raw: string): LineItem[] {
       }))
       .filter((li) => li.label && li.unitCents > 0)
   } catch {
+    logWarn('invoices', 'malformed line-items JSON')
     return []
   }
 }
@@ -69,6 +71,7 @@ function parseUrls(raw: string): string[] {
     if (!Array.isArray(arr)) return []
     return arr.filter(isBlobImageUrl).slice(0, 20)
   } catch {
+    logWarn('invoices', 'malformed photo-URL JSON')
     return []
   }
 }
@@ -158,7 +161,8 @@ export async function createInvoiceAction(
     await markInvoiceSent(invoice.id)
     try {
       await sendProjectInvoiceEmail(invoice)
-    } catch {
+    } catch (err) {
+      logError('invoices/send-email', err)
       emailOk = false
     }
   }
@@ -195,7 +199,8 @@ export async function updateInvoiceAction(
           await markInvoiceSent(id)
           await sendProjectInvoiceEmail(updated)
         }
-      } catch {
+      } catch (err) {
+        logError('invoices/update-and-send-email', err)
         emailOk = false
       }
     }
@@ -218,7 +223,8 @@ export async function sendInvoiceAction(formData: FormData): Promise<void> {
   let emailOk = true
   try {
     await sendProjectInvoiceEmail(invoice!)
-  } catch {
+  } catch (err) {
+    logError('invoices/resend-email', err)
     emailOk = false
   }
   revalidatePath(`/admin/invoices/${id}`)
@@ -234,7 +240,8 @@ export async function sendFinalInvoiceAction(formData: FormData): Promise<void> 
   let emailOk = true
   try {
     await sendFinalInvoiceEmail(invoice!)
-  } catch {
+  } catch (err) {
+    logError('invoices/final-email', err)
     emailOk = false
   }
   revalidatePath(`/admin/invoices/${id}`)
@@ -266,7 +273,8 @@ export async function markCompletedAction(formData: FormData): Promise<void> {
   if (invoice && invoice.payment.status !== 'paid') {
     try {
       await sendBalanceDueEmail(invoice)
-    } catch {
+    } catch (err) {
+      logError('invoices/balance-due-email', err)
       emailOk = false
     }
   }
@@ -305,7 +313,8 @@ export async function acceptInvoiceByToken(formData: FormData): Promise<void> {
   if (invoice) {
     try {
       await sendFinalInvoiceEmail(invoice)
-    } catch {
+    } catch (err) {
+      logError('invoices/accept-final-email', err, { invoiceId: invoice.id })
       /* the pay options are on the page regardless — don't block acceptance */
     }
   }

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import type Stripe from 'stripe'
 import { getStripe } from '@/lib/stripe'
 import { markIdentityVerified } from '@/lib/tenants'
+import { logError, logWarn } from '@/lib/log'
 
 /**
  * Stripe Identity webhook — the source of truth (covers tenants who close the tab
@@ -18,6 +19,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   try {
     event = getStripe().webhooks.constructEvent(raw, sig, secret)
   } catch {
+    logWarn('identity/webhook', 'invalid Stripe signature')
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
 
@@ -31,12 +33,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
         })
         const outputs = full.verified_outputs as { id_number?: string | null } | null
         if (outputs?.id_number) last4 = outputs.id_number.replace(/\D/g, '').slice(-4)
-      } catch {
+      } catch (err) {
+        logError('identity/webhook/last4', err, { sessionId: vs.id })
         /* last 4 is optional */
       }
       await markIdentityVerified({ userId: vs.metadata?.userId, sessionId: vs.id, last4 })
     } catch (err) {
-      console.error('Identity webhook error:', err)
+      logError('identity/webhook', err)
       // Return 200 anyway so Stripe doesn't retry forever; status check is the fallback.
     }
   }

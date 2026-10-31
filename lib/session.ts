@@ -2,6 +2,7 @@ import 'server-only'
 
 import { cookies } from 'next/headers'
 import { SignJWT, jwtVerify } from 'jose'
+import { logWarn } from './log'
 
 /**
  * Stateless session management using a signed JWT stored in an HttpOnly cookie.
@@ -56,6 +57,7 @@ export async function decrypt(token: string | undefined): Promise<SessionPayload
     const { payload } = await jwtVerify(token, encodedKey, { algorithms: ['HS256'] })
     return payload as SessionPayload
   } catch {
+    logWarn('session', 'invalid or expired session cookie')
     return null
   }
 }

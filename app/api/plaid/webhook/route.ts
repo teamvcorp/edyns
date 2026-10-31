@@ -8,6 +8,7 @@ import {
   type Tenant,
 } from '@/lib/tenants'
 import { sendSecurityAlert } from '@/lib/email'
+import { logError, logWarn } from '@/lib/log'
 
 /** Flag a tenant for manual review and alert ops (best-effort). */
 async function flagAndAlert(tenant: Tenant, reason: string): Promise<void> {
@@ -17,7 +18,8 @@ async function flagAndAlert(tenant: Tenant, reason: string): Promise<void> {
       subject: 'Tenant income verification needs review',
       body: `${reason} — ${tenant.name} (${tenant.email}). Income could not be confirmed automatically; follow up (bank-deposit fallback or paystub).`,
     })
-  } catch {
+  } catch (err) {
+    logError('plaid/webhook/alert', err, { tenantId: tenant.id })
     /* alert is best-effort */
   }
 }
@@ -45,6 +47,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     event = JSON.parse(rawBody)
   } catch {
+    logWarn('plaid/webhook', 'unparseable payload')
     return new Response('Bad payload', { status: 400 })
   }
 

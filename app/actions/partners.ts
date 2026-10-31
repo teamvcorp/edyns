@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation'
 import { createSession } from '@/lib/session'
 import { isEmailTaken, registerPartner } from '@/lib/users'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+import { logError } from '@/lib/log'
 
 // Account-creation throttle: cap new partner accounts per IP in a rolling window.
 const SIGNUP_LIMIT = 5
@@ -85,7 +86,7 @@ export async function enrollPartner(_prev: EnrollState, formData: FormData): Pro
       taxId: values.taxId,
     })
   } catch (err) {
-    console.error('enrollPartner: failed to register partner', err)
+    logError('partners/enroll', err)
     return { message: 'Something went wrong creating your account. Please try again.', values }
   }
 

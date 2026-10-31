@@ -7,6 +7,7 @@ import { Text } from '@/components/elements/text'
 import { ButtonLink } from '@/components/elements/button'
 import { getStripe } from '@/lib/stripe'
 import { applyFeeResult } from '@/lib/tenants'
+import { logError } from '@/lib/log'
 
 export const metadata: Metadata = { title: 'Application submitted' }
 
@@ -45,7 +46,8 @@ export default async function TenantEnrollCompletePage({
         heading = 'Payment processing'
         body = 'Your bank payment is processing. Your application is pending review and we’ll confirm the fee shortly.'
       }
-    } catch {
+    } catch (err) {
+      logError('tenants/enroll-complete', err)
       body = 'We couldn’t confirm your payment automatically. If you completed it, it will update shortly.'
     }
   }

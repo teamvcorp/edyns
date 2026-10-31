@@ -3,6 +3,7 @@ import { sessionWithRole } from '@/lib/dal'
 import { getTenantByUserId, setPlaidUserToken } from '@/lib/tenants'
 import { createUserToken, createIncomeLinkToken } from '@/lib/plaid'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
+import { logError, logWarn } from '@/lib/log'
 
 /** Issues a Plaid Link token for the signed-in tenant's income verification.
  *  Body may request `{ source: 'bank' }` so an employee whose payroll provider
@@ -11,7 +12,14 @@ export async function POST(req: Request): Promise<NextResponse> {
   const session = await sessionWithRole('tenant')
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const body = await req.json().catch(() => null)
+  // No body is normal (default payroll path). Only a body that claims to be JSON
+  // but doesn't parse is worth noting.
+  const body = await req.json().catch(() => {
+    if (req.headers.get('content-type')?.includes('application/json')) {
+      logWarn('plaid/link-token', 'malformed JSON request body')
+    }
+    return null
+  })
   const requestedBank = body?.source === 'bank'
 
   // Throttle link-token issuance per tenant and per IP to curb link abuse / Plaid spend.
@@ -49,7 +57,7 @@ export async function POST(req: Request): Promise<NextResponse> {
     const linkToken = await createIncomeLinkToken(userToken, session.sub, source)
     return NextResponse.json({ link_token: linkToken })
   } catch (err) {
-    console.error('[plaid/link-token] failed:', err)
+    logError('plaid/link-token', err)
     return NextResponse.json({ error: unavailable }, { status: 503 })
   }
 }

@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { PropertyInput, PropertyStatus } from './properties'
 import { MIN_TIER, MAX_TIER } from './tiers'
+import { logWarn } from './log'
 
 /**
  * Shared parsing + validation for property forms. Used by all three entry points
@@ -35,6 +36,7 @@ export function isBlobImageUrl(u: unknown): u is string {
     const url = new URL(u)
     return url.protocol === 'https:' && url.hostname.endsWith(BLOB_HOST_SUFFIX)
   } catch {
+    logWarn('upload-url', 'rejected malformed URL')
     return false
   }
 }
@@ -101,6 +103,7 @@ export function parsePropertyForm(formData: FormData, opts: { admin?: boolean } 
       const parsed = JSON.parse(values.galleryUrls)
       if (Array.isArray(parsed)) galleryUrls = parsed.filter(isBlobImageUrl)
     } catch {
+      logWarn('property-input', 'malformed gallery JSON')
       /* ignore malformed */
     }
   }

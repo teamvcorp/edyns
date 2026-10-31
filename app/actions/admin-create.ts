@@ -18,6 +18,7 @@ import { sendCredentialsEmail } from '@/lib/email'
 import type { TenantEnrollState } from '@/app/actions/tenants'
 import type { EnrollState } from '@/app/actions/partners'
 import type { PropertyEditState } from '@/app/actions/admin'
+import { logError, logWarn } from '@/lib/log'
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
@@ -37,6 +38,7 @@ function parsePeople(json: string): Person[] {
       .map((p) => ({ name: String(p.name).trim(), dob: String(p.dob).trim() }))
       .filter((p) => p.name && p.dob)
   } catch {
+    logWarn('admin-create', 'malformed people JSON')
     return []
   }
 }
@@ -171,7 +173,8 @@ export async function createTenantByAdmin(_prev: TenantEnrollState, formData: Fo
   let emailed = true
   try {
     await sendCredentialsEmail({ to: values.email, name: values.name, tempPassword: password, role: 'tenant' })
-  } catch {
+  } catch (err) {
+    logError('admin-create/tenant-credentials-email', err)
     emailed = false
   }
 
@@ -225,7 +228,8 @@ export async function createPartnerByAdmin(_prev: EnrollState, formData: FormDat
   let emailed = true
   try {
     await sendCredentialsEmail({ to: values.email, name: values.name, tempPassword: password, role: 'partner' })
-  } catch {
+  } catch (err) {
+    logError('admin-create/partner-credentials-email', err)
     emailed = false
   }
 
