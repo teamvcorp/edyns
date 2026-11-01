@@ -22,8 +22,13 @@ const DEFAULT_EQUITY_SHARE_PERCENT = 10
  * and idempotent (keyed on the invoice id) — never blocks the webhook response.
  */
 async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionId: string): Promise<void> {
-  // Only credit when money actually moved.
-  if (!invoice.id || !invoice.amount_paid || invoice.amount_paid <= 0) return
+  // Credit any real rent invoice that is now paid — whether the money moved
+  // through Stripe, came from an alternative-payment credit on the customer
+  // balance (cash/check recorded by an admin), or a mix. Those credits stand in
+  // for rent paid another way, so the partner's share still accrues (policy
+  // decided 2026-11-01). Zero-total invoices — e.g. the $0 invoice Stripe issues
+  // when a "trial" (our next-draft-date scheduling) starts — are skipped.
+  if (!invoice.id || invoice.status !== 'paid' || !invoice.total || invoice.total <= 0) return
 
   const tenant = await getTenantBySubscriptionId(subscriptionId)
   if (!tenant?.currentPropertyId) return
@@ -32,9 +37,10 @@ async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionI
   if (!property) return
 
   // Equity accrues on the base rent the platform keeps — the Stripe processing-fee
-  // gross-up that the tenant covers stays with the platform. Fall back to the amount
-  // paid if no base is recorded (shouldn't happen for a subscription invoice).
-  const rentCents = tenant.billing?.baseAmountCents ?? invoice.amount_paid
+  // gross-up that the tenant covers stays with the platform. Fall back to the
+  // invoice total (not amount_paid, which is 0 when a credit covered it) if no
+  // base is recorded (shouldn't happen for a subscription invoice).
+  const rentCents = tenant.billing?.baseAmountCents ?? invoice.total
 
   const sharePercent = property.equitySharePercent ?? DEFAULT_EQUITY_SHARE_PERCENT
   if (sharePercent <= 0) return

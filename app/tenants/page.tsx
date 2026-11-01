@@ -6,7 +6,7 @@ import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment } from '@/app/actions/tenants'
 import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { tierLabel } from '@/lib/tiers'
-import { formatAddress, formatCurrency } from '@/lib/format'
+import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
 import { SelfEmployedToggle } from '@/components/tenants/self-employed-toggle'
 import { IdentityVerifyButton } from '@/components/tenants/identity-verify-button'
@@ -275,10 +275,24 @@ export default async function TenantPortalPage({
         {billing ? (
           <Text className="text-sm/6">
             <p>
-              Drafting <strong>{formatCurrency(billing.amountCents / 100)} {frequencyLabel[billing.frequency]}</strong>{' '}
-              from your payment method, starting {new Date(billing.firstDraftAt).toLocaleDateString()}. This is{' '}
-              {Math.round(COLLECTION_RATE * 100)}% of your income plus Stripe processing, which you cover.
+              Drafting <strong>{formatCents(billing.amountCents)} {frequencyLabel[billing.frequency]}</strong> from
+              your payment method. Next draft:{' '}
+              <strong>{new Date(billing.nextDraftAt ?? billing.firstDraftAt).toLocaleDateString()}</strong>. This is{' '}
+              {Math.round(COLLECTION_RATE * 100)}% of your income plus Stripe processing, which you cover. Any credit on
+              your account (for example, a cash payment) is applied to your next draft automatically.
             </p>
+            {(tenant.rentCredits?.length ?? 0) > 0 && (
+              <>
+                <p className="mt-2 font-medium">Payments credited to your rent</p>
+                <ul>
+                  {[...(tenant.rentCredits ?? [])].reverse().map((c) => (
+                    <li key={c.stripeTransactionId}>
+                      {new Date(c.receivedAt).toLocaleDateString()} — {formatCents(c.amountCents)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
           </Text>
         ) : tenant.status === 'approved' ? (
           <Text className="text-sm/6">

@@ -13,6 +13,9 @@ import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
 import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
+import { RentAdjustForm } from '@/components/admin/rent-adjust-form'
+import { RentCreditForm } from '@/components/admin/rent-credit-form'
+import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
   replaceImportedWithBillingAction,
@@ -23,14 +26,45 @@ import {
   uploadPaystubAction,
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
-import { formatAddress, formatCurrency } from '@/lib/format'
-import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
+import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
+import {
+  COLLECTION_RATE,
+  REQUIRED_WEEKLY_HOURS,
+  getRentSubscriptionState,
+  getCustomerCreditCents,
+} from '@/lib/stripe'
 
 export const metadata: Metadata = { title: 'Review application' }
 
 const feeLabel = { unpaid: 'Unpaid', processing: 'Processing', paid: 'Paid' } as const
 const statusLabel = { pending: 'Pending', approved: 'Approved', rejected: 'Rejected' } as const
+const creditMethodLabel = {
+  cash: 'Cash',
+  check: 'Check',
+  money_order: 'Money order',
+  bank_transfer: 'Bank transfer',
+  other: 'Other',
+} as const
 const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
+
+// Date helpers live outside the component: reading the clock during render is
+// impure (React lint), and these only seed form defaults.
+/** yyyy-mm-dd for a date input, or '' if the date is missing or not in the future. */
+function futureDateInput(d?: Date): string {
+  if (!d) return ''
+  const date = new Date(d)
+  return date.getTime() > Date.now() ? date.toISOString().slice(0, 10) : ''
+}
+
+/** Today as yyyy-mm-dd — latest allowed "payment received" date. */
+function todayDateInput(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+/** Tomorrow as yyyy-mm-dd — earliest allowed next draft date. */
+function tomorrowDateInput(): string {
+  return new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -82,6 +116,14 @@ export default async function AdminTenantReviewPage({
   const t = await getTenantById(id)
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
+  // Live rent terms + unused credit straight from Stripe (null if Stripe is unreachable).
+  const [liveRent, creditCents] = t.billing
+    ? await Promise.all([
+        getRentSubscriptionState(t.billing.stripeSubscriptionId),
+        t.stripeCustomerId ? getCustomerCreditCents(t.stripeCustomerId) : Promise.resolve(null),
+      ])
+    : [null, null]
+  const nextDraftAt = liveRent?.nextDraftAt ?? t.billing?.nextDraftAt ?? t.billing?.firstDraftAt
 
   return (
     <section className="py-16">
@@ -431,19 +473,28 @@ export default async function AdminTenantReviewPage({
             {t.billing ? (
               <>
                 <dl className="grid gap-4 sm:grid-cols-3">
-                  <Row label="Amount" value={`${formatCurrency(t.billing.amountCents / 100)} ${frequencyLabel[t.billing.frequency]}`} />
-                  <Row label="Base (40%)" value={formatCurrency(t.billing.baseAmountCents / 100)} />
+                  <Row label="Amount" value={`${formatCents(t.billing.amountCents)} ${frequencyLabel[t.billing.frequency]}`} />
+                  <Row label="Base (40%)" value={formatCents(t.billing.baseAmountCents)} />
                   <Row label="Status" value={t.billing.status} />
                   <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
+                  <Row label="Next draft" value={nextDraftAt ? new Date(nextDraftAt).toLocaleDateString() : '—'} />
+                  <Row label="Unused credit" value={creditCents === null ? 'Unavailable (Stripe)' : formatCents(creditCents)} />
                 </dl>
+                {liveRent && liveRent.amountCents !== t.billing.amountCents && (
+                  <p className="text-sm text-amber-700 dark:text-amber-300">
+                    ⚠️ Stripe is charging {formatCents(liveRent.amountCents)} per draft, which differs from our record — it
+                    was likely changed in the Stripe dashboard. Saving changes below brings them back in sync.
+                  </p>
+                )}
                 {t.billing.imported && (
                   <div className="flex flex-col items-start gap-2 rounded-lg bg-olive-950/5 p-3 dark:bg-white/5">
                     <span className="rounded-full bg-olive-950/10 px-2 py-0.5 text-xs font-semibold text-olive-700 dark:bg-white/10 dark:text-olive-300">
                       Imported from Stripe
                     </span>
                     <p className="text-sm text-olive-600 dark:text-olive-500">
-                      Amount and schedule come from the existing Stripe subscription. Replacing with the 40% model cancels
-                      this subscription and returns the tenant to standard rent setup.
+                      Amount and schedule come from the existing Stripe subscription. You can change them below (the app then
+                      manages it), or replace it with the 40% model — which cancels this subscription and returns the
+                      tenant to standard rent setup.
                     </p>
                     <form action={replaceImportedWithBillingAction}>
                       <input type="hidden" name="id" value={t.id} />
@@ -465,6 +516,70 @@ export default async function AdminTenantReviewPage({
                         Reconfirm income &amp; resume rent
                       </Button>
                     </form>
+                  </div>
+                )}
+
+                {t.billing.status !== 'canceled' && (
+                  <>
+                    <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                      <h4 className="font-semibold text-olive-950 dark:text-white">Change amount, frequency or date</h4>
+                      <RentAdjustForm
+                        tenantId={t.id}
+                        nonce={randomUUID()}
+                        current={{
+                          baseDollars: t.billing.baseAmountCents / 100,
+                          frequency: t.billing.frequency,
+                          nextDraft: futureDateInput(nextDraftAt),
+                        }}
+                        minDate={tomorrowDateInput()}
+                      />
+                    </div>
+
+                    <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                      <h4 className="font-semibold text-olive-950 dark:text-white">Add credit for a payment made another way</h4>
+                      {t.stripeCustomerId ? (
+                        <RentCreditForm
+                          tenantId={t.id}
+                          nonce={randomUUID()}
+                          nextDraftCents={liveRent?.amountCents ?? t.billing.amountCents}
+                          today={todayDateInput()}
+                        />
+                      ) : (
+                        <p className="text-sm text-red-600 dark:text-red-400">No Stripe customer on file to credit.</p>
+                      )}
+                    </div>
+                  </>
+                )}
+
+                {(t.rentCredits?.length ?? 0) > 0 && (
+                  <div className="flex flex-col gap-1 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                    <h4 className="font-semibold text-olive-950 dark:text-white">Credits recorded</h4>
+                    <ul className="text-sm text-olive-700 dark:text-olive-300">
+                      {[...(t.rentCredits ?? [])].reverse().map((c) => (
+                        <li key={c.stripeTransactionId}>
+                          {new Date(c.receivedAt).toLocaleDateString()} — {formatCents(c.amountCents)}{' '}
+                          {creditMethodLabel[c.method]}
+                          {c.reference ? ` · ${c.reference}` : ''}
+                          {c.note ? ` · ${c.note}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {(t.billingHistory?.length ?? 0) > 0 && (
+                  <div className="flex flex-col gap-1 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                    <h4 className="font-semibold text-olive-950 dark:text-white">Rent changes</h4>
+                    <ul className="text-sm text-olive-700 dark:text-olive-300">
+                      {[...(t.billingHistory ?? [])].reverse().map((h, i) => (
+                        <li key={i}>
+                          {new Date(h.at).toLocaleDateString()} — {formatCents(h.from.amountCents)}{' '}
+                          {frequencyLabel[h.from.frequency]} → {formatCents(h.to.amountCents)}{' '}
+                          {frequencyLabel[h.to.frequency]}, next draft {new Date(h.to.nextDraftAt).toLocaleDateString()}
+                          {h.note ? ` · ${h.note}` : ''}
+                        </li>
+                      ))}
+                    </ul>
                   </div>
                 )}
               </>

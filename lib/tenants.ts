@@ -55,6 +55,34 @@ export interface Billing {
    * 40% rent setup. For these the `baseAmountCents` mirrors `amountCents`.
    */
   imported?: boolean
+  /** Next scheduled draft, set when an admin changes the terms (else see firstDraftAt / Stripe). */
+  nextDraftAt?: Date
+}
+
+/** Audit entry for an admin change to rent terms (amount / frequency / next draft date). */
+export interface BillingChange {
+  at: Date
+  from: { baseAmountCents: number; amountCents: number; frequency: BillingFrequency }
+  to: { baseAmountCents: number; amountCents: number; frequency: BillingFrequency; nextDraftAt: Date }
+  note?: string
+}
+
+export const RENT_CREDIT_METHODS = ['cash', 'check', 'money_order', 'bank_transfer', 'other'] as const
+export type RentCreditMethod = (typeof RENT_CREDIT_METHODS)[number]
+
+/**
+ * A rent credit recorded for a payment made outside Stripe (cash, check, …).
+ * The credit itself lives on the Stripe customer balance and reduces the next
+ * draft(s); this is our audit copy.
+ */
+export interface RentCredit {
+  stripeTransactionId: string
+  amountCents: number
+  method: RentCreditMethod
+  reference?: string
+  note?: string
+  receivedAt: Date
+  recordedAt: Date
 }
 
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected'
@@ -113,6 +141,10 @@ export interface TenantDoc {
   flaggedAt?: Date
   /** Recurring rent collection (40% of income) via Stripe. */
   billing?: Billing
+  /** Admin changes to rent terms, oldest first. */
+  billingHistory?: BillingChange[]
+  /** Alternative-payment credits applied to the Stripe balance, oldest first. */
+  rentCredits?: RentCredit[]
   /** When the next monthly income/job-loss re-check is due (set when billing starts). */
   nextIncomeCheckAt?: Date
   /** Tenants start at tier 0 on approval and move up as they relocate. */
@@ -473,6 +505,47 @@ export async function clearBilling(tenantId: string): Promise<void> {
 }
 
 /** Update rent billing status from a Stripe webhook. Never clobbers a manual 'paused' (job-loss) state. */
+/**
+ * Save new rent terms after Stripe accepted the change, and append the audit
+ * entry. Clears `imported`: once the app has re-priced it, the app manages it.
+ */
+export async function updateBillingTerms(
+  tenantId: string,
+  terms: { baseAmountCents: number; amountCents: number; frequency: BillingFrequency; nextDraftAt: Date },
+  change: BillingChange,
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), billing: { $exists: true } },
+    {
+      $set: {
+        'billing.baseAmountCents': terms.baseAmountCents,
+        'billing.amountCents': terms.amountCents,
+        'billing.frequency': terms.frequency,
+        'billing.nextDraftAt': terms.nextDraftAt,
+        updatedAt: new Date(),
+      },
+      $unset: { 'billing.imported': '' },
+      $push: { billingHistory: change },
+    },
+  )
+  return res.matchedCount === 1
+}
+
+/** Append an alternative-payment credit (already applied in Stripe) to the tenant's audit log. Idempotent. */
+export async function recordRentCredit(tenantId: string, credit: RentCredit): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  // Skip if this Stripe transaction is already logged (a retried submit replays
+  // the same idempotent Stripe response, so it must not add a second entry).
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'rentCredits.stripeTransactionId': { $ne: credit.stripeTransactionId } },
+    { $push: { rentCredits: credit }, $set: { updatedAt: new Date() } },
+  )
+  return res.matchedCount === 1
+}
+
 export async function setBillingStatusBySubscription(subscriptionId: string, status: BillingStatus): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne(

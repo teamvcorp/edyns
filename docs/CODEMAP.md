@@ -28,9 +28,10 @@ All `lib/*.ts` are `server-only` **except** `format.ts` and `tiers.ts` (safe in 
 | Throttle | `rateLimit({key,limit,windowMs})`, `getClientIp()` | `lib/ratelimit.ts` |
 | Validate a Blob URL | `isBlobImageUrl(u)` (https + `*.public.blob.vercel-storage.com`) | `lib/property-input.ts:32` |
 | Parse property form | `parsePropertyForm(formData, {admin?})` | `lib/property-input.ts` |
-| Money (whole dollars) | `formatCurrency`, `formatNumber`, `formatAddress` — **no cents formatter yet** | `lib/format.ts` |
+| Money | `formatCurrency` (whole dollars), `formatCents(cents)` (exact — use for charges), `formatNumber`, `formatAddress` | `lib/format.ts` |
 | Tier labels | `TIERS`, `MIN_TIER`, `MAX_TIER`, `tierLabel(t)` | `lib/tiers.ts` |
-| Business constants | `APPLICATION_FEE_CENTS`, `COLLECTION_RATE`, `REQUIRED_WEEKLY_HOURS`, `withProcessingFee`, `processingFeeCents` | `lib/stripe.ts` |
+| Business constants | `APPLICATION_FEE_CENTS`, `COLLECTION_RATE`, `REQUIRED_WEEKLY_HOURS` | `lib/stripe.ts` |
+| Fee gross-up (client-safe) | `withProcessingFee`, `processingFeeCents` (also re-exported by `lib/stripe.ts`) | `lib/fees.ts` |
 | Stripe client | `getStripe()`; import helpers `fetchCustomerForImport`, `fetchSubscriptionForImport`; `invoiceSubscriptionId(inv)` | `lib/stripe.ts` |
 | Plaid | `getPlaid`, `createUserToken`, `createIncomeLinkToken`, `exchangePublicToken`, `removePlaidItem`, `verifyPlaidWebhook` | `lib/plaid.ts` |
 | Income math | `readIncome({userToken,selfEmployed,claimedHourlyRate})`, `impliedWeeklyHours` | `lib/income.ts` |
@@ -75,7 +76,7 @@ rely on the private `undoMoveIn` helper's gate — keep an inline gate if refact
 | D7/D8 | Partner & tenant form validation copied between self-enroll and admin-create | `validatePartnerForm` / `validateTenantForm` |
 | D9 | `String(formData.get(k) ?? '').trim()` everywhere | `formStr(fd, k)` |
 | D10 | `baseUrl` ×7, **inconsistent trailing-slash strip** | `lib/env.ts` |
-| D11 | Cents formatting `$${(c/100).toFixed(2)}` ×5+ | `formatCents` in `lib/format.ts` |
+| D11 | Cents formatting `$${(c/100).toFixed(2)}` ×5+ — `formatCents` now exists; migrate old sites | `lib/format.ts` |
 | D12/D13 | Email HTML wrapper + CTA button repeated in `lib/email.ts` | `emailLayout()`, `emailButton()` |
 | D14 | Stripe Connect transfer block ×2 (`admin.ts:761`, `:821`) | `transferToPartner()` |
 | D15 | Available balance (equity − paid − pending) ×4 | `availableCentsByPartner()` in `lib/payouts.ts` |
@@ -120,7 +121,22 @@ Good already: webhook signature checks (Stripe, Identity, Plaid w/ timing-safe),
 AES-GCM token encryption, `server-only` on lib, rate limits on login/signup/Plaid, invite claim is atomic,
 HTML escaping in emails, idempotent transfer/equity writes.
 
-## 7. Next planned work
+## 7. Rent changes & credits (built 2026-11-01)
 
-- Admin: adjust a tenant's rent **amount and frequency** after initial setup, synced to the Stripe subscription.
-- Admin: **skip a payment** by issuing a credit (Stripe customer balance credit / invoice credit).
+Admin tenant page → Rent collection card. Actions in `app/actions/rent.ts`; Stripe calls in `lib/stripe.ts`
+(`adjustRentSubscription`, `addCustomerCredit`, `getRentSubscriptionState`, `getCustomerCreditCents`, `RENT_INTERVALS`).
+Stripe behaviour relied on: **`docs/vendor/stripe-rent-billing.md`**.
+
+Decisions (don't undo):
+- Changes take effect on the admin-chosen next draft date — **no proration** (`trial_end` re-anchors the cycle).
+- Imported subscriptions can be adjusted; afterwards the app manages them (`billing.imported` cleared, fee gross-up applied).
+- Credits (cash/check/… paid outside Stripe) go on the Stripe **customer balance** and reduce the next draft(s).
+  **Partner equity still accrues**: the webhook credits equity on any paid invoice with `total > 0`, including ones
+  covered by credit. Therefore the property page's "Record cash rent payment" refuses tenants on Stripe rent
+  (`?cash=use-credit`) — recording both would double-count equity.
+- Every admin Stripe mutation uses a form nonce as the idempotency key; audit trail in `tenant.billingHistory` /
+  `tenant.rentCredits`; tenant is emailed on every change/credit.
+
+## 8. Next planned work
+
+- (none queued)

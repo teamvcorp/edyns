@@ -251,6 +251,46 @@ export async function sendRepairStatusEmail(input: {
   await sendEmail({ to: input.to, subject: `Repair update: ${input.statusLabel} — ${input.title}`, html })
 }
 
+/** Tell a tenant their rent terms changed (amount / frequency / next draft date). */
+export async function sendRentChangeEmail(input: {
+  to: string
+  name: string
+  amount: string
+  frequencyLabel: string
+  nextDraft: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Your rent schedule changed, ${escapeHtml(input.name)}</h2>
+      <p>Starting <strong>${escapeHtml(input.nextDraft)}</strong>, your rent will draft
+      <strong>${escapeHtml(input.amount)} ${escapeHtml(input.frequencyLabel)}</strong> (Stripe processing included).</p>
+      <p>Any credit on your account is applied to your next draft automatically.</p>
+      <p><a href="${escapeHtml(`${baseUrl}/tenants`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View your portal</a></p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: 'Your rent schedule has changed', html })
+}
+
+/** Receipt for a payment made outside Stripe, credited to the tenant's next rent draft(s). */
+export async function sendRentCreditEmail(input: {
+  to: string
+  name: string
+  amount: string
+  methodLabel: string
+  receivedOn: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Payment received — thank you, ${escapeHtml(input.name)}</h2>
+      <p>We recorded your <strong>${escapeHtml(input.methodLabel)}</strong> payment of
+      <strong>${escapeHtml(input.amount)}</strong> received on ${escapeHtml(input.receivedOn)}.</p>
+      <p>It has been added as a credit on your account and will reduce your next rent draft automatically. If it’s
+      more than one draft, the rest carries over to the following one.</p>
+      <p style="color:#6b6b60;font-size:13px">Keep this email as your receipt. Questions? Just reply.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: `Payment received — ${input.amount} credited to your rent`, html })
+}
+
 /** Partner equity report for one property: YTD + lifetime totals and a line per payment. */
 export async function sendEquityReportEmail(input: {
   to: string

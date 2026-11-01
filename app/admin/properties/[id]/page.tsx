@@ -22,6 +22,10 @@ const cashCopy: Record<string, { text: string; tone: 'ok' | 'warn' }> = {
   date: { text: 'Enter a valid payment date.', tone: 'warn' },
   'no-tenant': { text: 'No tenant is currently placed at this property.', tone: 'warn' },
   error: { text: 'Cash payments can only be recorded on an approved property.', tone: 'warn' },
+  'use-credit': {
+    text: 'This tenant pays rent through Stripe — record the payment with “Add credit” on their tenant page instead, so it reduces their next draft (and equity isn’t counted twice).',
+    tone: 'warn',
+  },
 }
 
 import { inputClass } from '@/components/elements/input'
@@ -89,8 +93,9 @@ export default async function AdminPropertyEditPage({
             )}
             <Text className="text-sm/6">
               <p>
-                For rent paid in cash (e.g. an auto-draft failed). Credits partner equity the same way an automatic
-                payment does — {property.equitySharePercent ?? 10}% of the amount — and is logged as a cash payment.
+                For rent paid in cash by a tenant who is <strong>not</strong> on Stripe rent collection. Credits partner
+                equity the same way an automatic payment does — {property.equitySharePercent ?? 10}% of the amount — and
+                is logged as a cash payment. For tenants on Stripe rent, use “Add credit” on their tenant page.
               </p>
             </Text>
             {tenant ? (

@@ -55,7 +55,13 @@ import {
   pendingCentsByPartner,
 } from '@/lib/payouts'
 import { totalEquityCentsByPartner, recordRentEquity, repricePropertyEquity } from '@/lib/equity'
-import { getStripe, withProcessingFee, fetchSubscriptionForImport, type ImportedSubscription } from '@/lib/stripe'
+import {
+  getStripe,
+  withProcessingFee,
+  fetchSubscriptionForImport,
+  RENT_INTERVALS,
+  type ImportedSubscription,
+} from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail, sendVerificationResetEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 import { logError } from '@/lib/log'
@@ -261,6 +267,10 @@ export async function addCashRentPaymentAction(formData: FormData): Promise<void
   // Equity is credited against the tenant currently placed at the property.
   const tenant = await findTenantByProperty(propertyId)
   if (!tenant) redirect(`${back}?cash=no-tenant`)
+  // Tenants on Stripe rent must be credited via the tenant page (app/actions/rent.ts):
+  // that credit reduces their next draft and the webhook credits equity when the
+  // draft is paid. Recording it here as well would count the equity twice.
+  if (tenant.billing && tenant.billing.status !== 'canceled') redirect(`${back}?cash=use-credit`)
 
   const paidAt = dateStr ? new Date(`${dateStr}T12:00:00`) : new Date()
   if (Number.isNaN(paidAt.getTime())) redirect(`${back}?cash=date`)
@@ -497,11 +507,6 @@ export async function resetTenantVerificationAction(formData: FormData): Promise
 
 // ---- Rent collection setup (admin-driven, after income is verified) ----
 
-const RENT_INTERVALS: Record<BillingFrequency, { interval: 'week' | 'month'; interval_count: number }> = {
-  weekly: { interval: 'week', interval_count: 1 },
-  biweekly: { interval: 'week', interval_count: 2 },
-  monthly: { interval: 'month', interval_count: 1 },
-}
 
 /**
  * Set up recurring rent for an approved tenant: the admin enters the 40% amount,
