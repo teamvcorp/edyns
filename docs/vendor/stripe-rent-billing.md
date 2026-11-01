@@ -24,6 +24,12 @@ Re-verify if the SDK major version changes.
   pass trial_end, so that never happens.
 - `pause_collection` is untouched by these updates.
 
+## Canceled subscriptions
+- A canceled subscription is final in Stripe — it cannot be resumed/reactivated. "Restart" = create a new
+  subscription for the same customer (`createRentSubscription()`).
+- Before creating, check the old one really ended (`subscriptionEnded()`): status `canceled` / `incomplete_expired`,
+  or `resource_missing` on retrieve. Anything else → refuse (otherwise two live subscriptions = double charging).
+
 ## Credits for payments made outside Stripe — `addCustomerCredit()` (lib/stripe.ts)
 - `stripe.customers.createBalanceTransaction(customerId, { amount, currency, description, metadata })`.
 - **Negative `amount` = credit** to the customer (Stripe stores credit as a negative `customer.balance`).

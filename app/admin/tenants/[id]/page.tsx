@@ -486,7 +486,7 @@ export default async function AdminTenantReviewPage({
                     was likely changed in the Stripe dashboard. Saving changes below brings them back in sync.
                   </p>
                 )}
-                {t.billing.imported && (
+                {t.billing.imported && t.billing.status !== 'canceled' && (
                   <div className="flex flex-col items-start gap-2 rounded-lg bg-olive-950/5 p-3 dark:bg-white/5">
                     <span className="rounded-full bg-olive-950/10 px-2 py-0.5 text-xs font-semibold text-olive-700 dark:bg-white/10 dark:text-olive-300">
                       Imported from Stripe
@@ -516,6 +516,34 @@ export default async function AdminTenantReviewPage({
                         Reconfirm income &amp; resume rent
                       </Button>
                     </form>
+                  </div>
+                )}
+
+                {/* Canceled: Stripe can't reactivate, so restart = a new subscription (app/actions/rent.ts). */}
+                {t.billing.status === 'canceled' && (
+                  <div className="flex flex-col gap-3 rounded-lg bg-red-500/5 p-4 ring-1 ring-red-500/20">
+                    <h4 className="font-semibold text-olive-950 dark:text-white">Restart rent collection</h4>
+                    <p className="text-sm text-olive-600 dark:text-olive-500">
+                      This tenant’s subscription is canceled. Restarting creates a new subscription on their saved
+                      payment method (or the default one on their Stripe customer). The old record is kept in history.
+                    </p>
+                    {!t.currentPropertyId && (
+                      <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
+                        ⚠️ This tenant isn’t placed in a property, so rent will collect but no partner equity accrues.
+                        Approve a move-in first if they live in one of our homes.
+                      </p>
+                    )}
+                    <RentAdjustForm
+                      mode="restart"
+                      tenantId={t.id}
+                      nonce={randomUUID()}
+                      current={{
+                        baseDollars: t.billing.baseAmountCents / 100,
+                        frequency: t.billing.frequency,
+                        nextDraft: '',
+                      }}
+                      minDate={tomorrowDateInput()}
+                    />
                   </div>
                 )}
 

@@ -143,6 +143,8 @@ export interface TenantDoc {
   billing?: Billing
   /** Admin changes to rent terms, oldest first. */
   billingHistory?: BillingChange[]
+  /** Earlier (canceled) billing records, archived when rent is restarted. Oldest first. */
+  previousBillings?: Billing[]
   /** Alternative-payment credits applied to the Stripe balance, oldest first. */
   rentCredits?: RentCredit[]
   /** When the next monthly income/job-loss re-check is due (set when billing starts). */
@@ -530,6 +532,26 @@ export async function updateBillingTerms(
       $push: { billingHistory: change },
     },
   )
+  return res.matchedCount === 1
+}
+
+/**
+ * Replace a CANCELED billing record with a new subscription, archiving the old
+ * one in `previousBillings`. Atomic: matches only while billing is still
+ * 'canceled', so two concurrent restarts can't both win. False if not matched.
+ */
+export async function restartBilling(tenantId: string, billing: Billing): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne({ _id: new ObjectId(tenantId), 'billing.status': 'canceled' }, [
+    {
+      // Pipeline update so the CURRENT billing value can be appended to the archive.
+      $set: {
+        previousBillings: { $concatArrays: [{ $ifNull: ['$previousBillings', []] }, ['$billing']] },
+      },
+    },
+    { $set: { billing: { $literal: billing }, updatedAt: new Date() } },
+  ])
   return res.matchedCount === 1
 }
 

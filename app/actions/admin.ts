@@ -60,6 +60,7 @@ import {
   withProcessingFee,
   fetchSubscriptionForImport,
   RENT_INTERVALS,
+  createRentSubscription,
   type ImportedSubscription,
 } from '@/lib/stripe'
 import { sendApprovalEmail, sendWelcomeBackEmail, sendVerificationResetEmail } from '@/lib/email'
@@ -548,26 +549,17 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
   let subscriptionId: string
   let subActive: boolean
   try {
-    const stripe = getStripe()
-    const product = await stripe.products.create({
-      name: 'edynsgate rent (Effort Exchange)',
-      metadata: { tenantId: id },
+    // Shared with the restart flow (app/actions/rent.ts).
+    const created = await createRentSubscription({
+      customerId: tenant.stripeCustomerId,
+      paymentMethodId: tenant.defaultPaymentMethodId,
+      amountCents,
+      frequency,
+      firstDraftAt: draftDate,
+      tenantId: id,
     })
-    const price = await stripe.prices.create({
-      currency: 'usd',
-      unit_amount: amountCents,
-      recurring: RENT_INTERVALS[frequency],
-      product: product.id,
-    })
-    const subscription = await stripe.subscriptions.create({
-      customer: tenant.stripeCustomerId,
-      items: [{ price: price.id }],
-      default_payment_method: tenant.defaultPaymentMethodId,
-      trial_end: firstDraftEpoch, // first draft happens on this date, then recurs
-      metadata: { tenantId: id },
-    })
-    subscriptionId = subscription.id
-    subActive = subscription.status === 'active' || subscription.status === 'trialing'
+    subscriptionId = created.subscriptionId
+    subActive = created.active
   } catch (err) {
     logError('admin/start-billing', err)
     return { error: 'Stripe could not start rent collection. Check the date and the tenant’s payment method.' }

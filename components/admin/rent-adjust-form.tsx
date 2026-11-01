@@ -5,13 +5,15 @@ import { Button } from '@/components/elements/button'
 import { inputClass } from '@/components/elements/input'
 import { withProcessingFee } from '@/lib/fees'
 import { formatCents } from '@/lib/format'
-import { adjustRentAction, type RentFormState } from '@/app/actions/rent'
+import { adjustRentAction, restartRentAction, type RentFormState } from '@/app/actions/rent'
 
 const labelClass = 'flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white'
 
 /**
- * Change rent amount / frequency / next draft date for a tenant with active
- * rent collection. No proration: the new terms start on the chosen date.
+ * mode 'adjust': change amount / frequency / next draft date of live rent.
+ *   No proration: the new terms start on the chosen date.
+ * mode 'restart': start a NEW subscription for canceled rent (Stripe can't
+ *   reactivate a canceled one); first draft on the chosen date.
  * `nonce` is a one-time id from the server render — the Stripe idempotency key.
  */
 export function RentAdjustForm({
@@ -19,14 +21,20 @@ export function RentAdjustForm({
   nonce,
   current,
   minDate,
+  mode = 'adjust',
 }: {
   tenantId: string
   nonce: string
   current: { baseDollars: number; frequency: string; nextDraft: string }
   /** Earliest selectable next draft (yyyy-mm-dd), computed on the server. The action re-checks it. */
   minDate: string
+  mode?: 'adjust' | 'restart'
 }) {
-  const [state, action, pending] = useActionState<RentFormState, FormData>(adjustRentAction, undefined)
+  const restart = mode === 'restart'
+  const [state, action, pending] = useActionState<RentFormState, FormData>(
+    restart ? restartRentAction : adjustRentAction,
+    undefined,
+  )
   const [amount, setAmount] = useState(current.baseDollars.toFixed(2))
   const base = Math.round(Number(amount) * 100)
   const preview = Number.isFinite(base) && base > 0 ? formatCents(withProcessingFee(base)) : '—'
@@ -59,20 +67,24 @@ export function RentAdjustForm({
           </select>
         </label>
         <label className={labelClass}>
-          Next draft date
+          {restart ? 'First draft date' : 'Next draft date'}
           <input name="nextDraft" type="date" required min={minDate} defaultValue={current.nextDraft} className={inputClass} />
         </label>
       </div>
 
       <p className="text-xs text-olive-600 dark:text-olive-500">
         Tenant will be charged <strong>{preview}</strong> per draft (base + Stripe processing, which they cover). Nothing is
-        charged before the next draft date; the new amount and frequency start then, and repeat from that date.
+        charged before the {restart ? 'first' : 'next'} draft date; {restart ? 'drafts' : 'the new amount and frequency'}{' '}
+        start then and repeat from that date.
+        {restart && ' A new Stripe subscription is created on the tenant’s saved payment method.'}
       </p>
 
-      <label className={labelClass}>
-        Reason (internal, optional)
-        <input name="note" maxLength={500} placeholder="e.g. Income re-verified after new job" className={inputClass} />
-      </label>
+      {!restart && (
+        <label className={labelClass}>
+          Reason (internal, optional)
+          <input name="note" maxLength={500} placeholder="e.g. Income re-verified after new job" className={inputClass} />
+        </label>
+      )}
 
       {state?.error && (
         <p role="alert" className="text-sm text-red-600 dark:text-red-400">
@@ -86,7 +98,7 @@ export function RentAdjustForm({
       )}
 
       <Button type="submit" disabled={pending} className="w-fit disabled:opacity-60">
-        {pending ? 'Updating Stripe…' : 'Save rent changes'}
+        {pending ? 'Updating Stripe…' : restart ? 'Restart rent collection' : 'Save rent changes'}
       </Button>
     </form>
   )

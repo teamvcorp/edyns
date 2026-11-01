@@ -9,11 +9,21 @@ import {
   updateBillingTerms,
   recordRentCredit,
   setNextIncomeCheck,
+  restartBilling,
+  attachStripeCustomer,
   RENT_CREDIT_METHODS,
   type BillingFrequency,
   type RentCreditMethod,
 } from '@/lib/tenants'
-import { RENT_INTERVALS, withProcessingFee, adjustRentSubscription, addCustomerCredit } from '@/lib/stripe'
+import {
+  RENT_INTERVALS,
+  withProcessingFee,
+  adjustRentSubscription,
+  addCustomerCredit,
+  createRentSubscription,
+  subscriptionEnded,
+  fetchCustomerForImport,
+} from '@/lib/stripe'
 import { sendRentChangeEmail, sendRentCreditEmail } from '@/lib/email'
 
 /**
@@ -25,7 +35,10 @@ import { sendRentChangeEmail, sendRentCreditEmail } from '@/lib/email'
  *    Partner equity still accrues: the webhook credits equity when the rent
  *    invoice is marked paid, even if a credit covered it (see api/stripe/webhook).
  *
- * Both forms carry a one-time `nonce` used as the Stripe idempotency key, so a
+ *  - restartRentAction: start a NEW subscription for a tenant whose rent was
+ *    canceled (Stripe can't reactivate a canceled subscription).
+ *
+ * All forms carry a one-time `nonce` used as the Stripe idempotency key, so a
  * double-click or retried submit can't apply a change or credit twice.
  */
 
@@ -221,4 +234,124 @@ export async function addRentCreditAction(_prev: RentFormState, formData: FormDa
 
   revalidateTenant(tenantId)
   return { ok: `Credited ${formatCents(amountCents)} — it will reduce the next draft.${emailNote}` }
+}
+
+/**
+ * Restart rent for a tenant whose subscription was CANCELED. Stripe can't
+ * reactivate a canceled subscription, so this creates a new one (same customer,
+ * saved payment method) that first drafts on the chosen date, and archives the
+ * old billing record.
+ *
+ * Safety: refuses unless Stripe confirms the old subscription really ended —
+ * otherwise the tenant could be charged by two subscriptions at once.
+ */
+export async function restartRentAction(_prev: RentFormState, formData: FormData): Promise<RentFormState> {
+  await requireRole('admin', '/admin/login')
+
+  const tenantId = String(formData.get('tenantId') ?? '')
+  const baseDollars = Number(String(formData.get('amount') ?? '').trim())
+  const frequency = String(formData.get('frequency') ?? '') as BillingFrequency
+  const firstDraftAt = readDate(formData.get('nextDraft'))
+  const nonce = readNonce(formData)
+
+  if (!nonce) return { error: 'This form expired — reload the page and try again.' }
+  if (!Number.isFinite(baseDollars) || baseDollars <= 0 || baseDollars > MAX_RENT_DOLLARS) {
+    return { error: 'Enter the base rent amount in dollars.' }
+  }
+  if (!RENT_INTERVALS[frequency]) return { error: 'Choose a frequency.' }
+  if (!firstDraftAt) return { error: 'Choose the first draft date.' }
+  if (firstDraftAt.getTime() <= Date.now()) return { error: 'The first draft date must be in the future.' }
+  if (firstDraftAt.getTime() > Date.now() + TWO_YEARS_MS) return { error: 'Choose a date within the next two years.' }
+
+  const tenant = await getTenantById(tenantId)
+  if (!tenant?.billing || tenant.billing.status !== 'canceled') {
+    return { error: 'Only canceled rent collection can be restarted.' }
+  }
+  if (!tenant.stripeCustomerId) return { error: 'This tenant has no Stripe customer on file.' }
+
+  // 1. Never double-bill: the old subscription must be over in Stripe.
+  const old = await subscriptionEnded(tenant.billing.stripeSubscriptionId)
+  if (old === null) return { error: 'Couldn’t confirm the old subscription with Stripe — try again shortly.' }
+  if (!old.ended) {
+    return {
+      error: `Stripe still shows the old subscription as “${old.status}”. Cancel it in Stripe first (or use “Change amount” if it is actually live), then restart.`,
+    }
+  }
+
+  // 2. Payment method: the one saved in the app, else the customer's default in
+  //    Stripe (imported tenants never had it saved locally).
+  let paymentMethodId = tenant.defaultPaymentMethodId
+  if (!paymentMethodId) {
+    const customer = await fetchCustomerForImport(tenant.stripeCustomerId)
+    paymentMethodId = customer.ok ? (customer.data.defaultPaymentMethodId ?? undefined) : undefined
+    if (!paymentMethodId) {
+      return {
+        error:
+          'No saved payment method on the Stripe customer. Add one to the customer in the Stripe dashboard, then restart.',
+      }
+    }
+    await attachStripeCustomer(tenant.userId, tenant.stripeCustomerId, paymentMethodId)
+  }
+
+  // 3. New subscription.
+  const baseAmountCents = Math.round(baseDollars * 100)
+  const amountCents = withProcessingFee(baseAmountCents)
+  let created: { subscriptionId: string; active: boolean }
+  try {
+    created = await createRentSubscription({
+      customerId: tenant.stripeCustomerId,
+      paymentMethodId,
+      amountCents,
+      frequency,
+      firstDraftAt,
+      tenantId,
+      idempotencyKey: `rent-restart:${nonce}`,
+    })
+  } catch (err) {
+    logError('rent/restart-create', err, { tenantId })
+    return { error: 'Stripe could not start the new subscription. Check the payment method and date.' }
+  }
+
+  // 4. Swap the billing record (archives the canceled one).
+  const saved = await restartBilling(tenantId, {
+    amountCents,
+    baseAmountCents,
+    frequency,
+    stripeSubscriptionId: created.subscriptionId,
+    status: created.active ? 'active' : 'past_due',
+    firstDraftAt,
+    nextDraftAt: firstDraftAt,
+    startedAt: new Date(),
+  })
+  if (!saved) {
+    // Someone else restarted at the same moment, or the record changed. The new
+    // Stripe subscription exists but isn't linked — flag loudly for cleanup.
+    logError('rent/restart-local-save', new Error('restartBilling matched no canceled billing'), {
+      tenantId,
+      subscriptionId: created.subscriptionId,
+    })
+    return {
+      error: `Rent record changed while restarting. New Stripe subscription ${created.subscriptionId} was created but not linked — cancel it in Stripe and reload.`,
+    }
+  }
+  await setNextIncomeCheck(tenantId, firstDraftAt)
+
+  let emailNote = ''
+  try {
+    await sendRentChangeEmail({
+      to: tenant.email,
+      name: tenant.name,
+      amount: formatCents(amountCents),
+      frequencyLabel: frequencyLabel[frequency],
+      nextDraft: firstDraftAt.toLocaleDateString(),
+    })
+  } catch (err) {
+    logError('rent/restart-email', err, { tenantId })
+    emailNote = ' (the email to the tenant failed — let them know directly)'
+  }
+
+  revalidateTenant(tenantId)
+  return {
+    ok: `Rent restarted: ${formatCents(amountCents)} ${frequencyLabel[frequency]}, first draft ${firstDraftAt.toLocaleDateString()}${emailNote}.`,
+  }
 }

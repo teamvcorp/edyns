@@ -372,3 +372,69 @@ export async function getCustomerCreditCents(customerId: string): Promise<number
     return null
   }
 }
+
+/**
+ * Create a rent subscription that first drafts on `firstDraftAt` and then
+ * recurs. Used for first-time rent setup and for restarting canceled rent.
+ * `trial_end` = first draft date (nothing charged before it). A fresh product +
+ * price per tenant keeps each tenant's rent independently adjustable.
+ * Throws on Stripe errors — callers log and show a friendly message.
+ */
+export async function createRentSubscription(input: {
+  customerId: string
+  paymentMethodId: string
+  amountCents: number
+  frequency: BillingFrequency
+  firstDraftAt: Date
+  tenantId: string
+  idempotencyKey?: string
+}): Promise<{ subscriptionId: string; active: boolean }> {
+  const stripe = getStripe()
+  const key = (suffix: string) => (input.idempotencyKey ? { idempotencyKey: `${input.idempotencyKey}:${suffix}` } : undefined)
+  const product = await stripe.products.create(
+    { name: 'edynsgate rent (Effort Exchange)', metadata: { tenantId: input.tenantId } },
+    key('product'),
+  )
+  const price = await stripe.prices.create(
+    {
+      currency: 'usd',
+      unit_amount: input.amountCents,
+      recurring: RENT_INTERVALS[input.frequency],
+      product: product.id,
+      metadata: { tenantId: input.tenantId },
+    },
+    key('price'),
+  )
+  const subscription = await stripe.subscriptions.create(
+    {
+      customer: input.customerId,
+      items: [{ price: price.id }],
+      default_payment_method: input.paymentMethodId,
+      trial_end: Math.floor(input.firstDraftAt.getTime() / 1000), // first draft on this date, then recurs
+      metadata: { tenantId: input.tenantId },
+    },
+    key('sub'),
+  )
+  return { subscriptionId: subscription.id, active: subscription.status === 'active' || subscription.status === 'trialing' }
+}
+
+/**
+ * Has this subscription really ended in Stripe? Guards rent restarts so a
+ * tenant can never end up with two live subscriptions (double charging).
+ * true = canceled / expired / no longer exists; false = still live (status
+ * returned); null = Stripe unreachable (caller should refuse, not guess).
+ */
+export async function subscriptionEnded(
+  subscriptionId: string,
+): Promise<{ ended: true } | { ended: false; status: Stripe.Subscription.Status } | null> {
+  try {
+    const sub = await getStripe().subscriptions.retrieve(subscriptionId)
+    if (sub.status === 'canceled' || sub.status === 'incomplete_expired') return { ended: true }
+    return { ended: false, status: sub.status }
+  } catch (err) {
+    // A deleted/unknown subscription can't charge anyone — treat as ended.
+    if (err instanceof Stripe.errors.StripeInvalidRequestError && err.code === 'resource_missing') return { ended: true }
+    logError('stripe/subscription-ended-check', err, { subscriptionId })
+    return null
+  }
+}

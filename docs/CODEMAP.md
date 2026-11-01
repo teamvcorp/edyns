@@ -134,6 +134,10 @@ Decisions (don't undo):
   **Partner equity still accrues**: the webhook credits equity on any paid invoice with `total > 0`, including ones
   covered by credit. Therefore the property page's "Record cash rent payment" refuses tenants on Stripe rent
   (`?cash=use-credit`) — recording both would double-count equity.
+- **Restart canceled rent** (`restartRentAction`): Stripe can't reactivate a canceled subscription, so a NEW one is
+  created via the shared `createRentSubscription` (also used by first-time setup). Refuses unless `subscriptionEnded()`
+  confirms the old sub is over (no double billing). Payment method falls back to the Stripe customer's default
+  (imported tenants never had one saved locally). Old billing archived in `tenant.previousBillings` (atomic swap).
 - Every admin Stripe mutation uses a form nonce as the idempotency key; audit trail in `tenant.billingHistory` /
   `tenant.rentCredits`; tenant is emailed on every change/credit.
 
