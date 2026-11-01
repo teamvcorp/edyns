@@ -22,6 +22,8 @@ All `lib/*.ts` are `server-only` **except** `format.ts` and `tiers.ts` (safe in 
 | Encrypt a secret at rest | `encryptString` / `decryptString`, `encryptBuffer` / `decryptBuffer` (AES-256-GCM, `EE_ENCRYPTION_KEY`) | `lib/crypto.ts` |
 | Compare secrets | `safeEqual(a, b)` (constant-time) | `lib/crypto.ts` |
 | **Log a caught error** | `logError(ctx, err, {ids})` for failures, `logWarn(ctx, msg, {ids})` for expected rejections. Strips Plaid secrets / Mongo PII. **Never `console.error(err)` in server code; never an empty `catch {}`.** Pass ids, not emails/names. | `lib/log.ts` |
+| Classify an upload by its bytes | `sniffFileType(buf)`, `IMAGE_TYPES`, `EXTENSION` (never trust browser MIME/filename) | `lib/files.ts` |
+| Repair requests | `repairablePropertiesFor(session)` (**the** eligibility check), `checkRepairPhotos`, `createRepairRequest`, `listRepairsForProperties` + `toPartnerView`, `listRepairsByRequester`, `listAllRepairs`, `setRepairStatus`, `cancelOwnRepair`, `canViewRepair`, `readRepairPhoto`; actions in `app/actions/repairs.ts`; photo route `app/api/repairs/[id]/photos/[n]` | `lib/repairs.ts` |
 | Paystubs (admin-only, encrypted in Mongo, no URL) | `savePaystubFile`, `readPaystubFile`, `deletePaystubFile`, `sniffPaystubType`; viewer route `app/admin/tenants/[id]/paystub` | `lib/paystubs.ts` |
 | Throttle | `rateLimit({key,limit,windowMs})`, `getClientIp()` | `lib/ratelimit.ts` |
 | Validate a Blob URL | `isBlobImageUrl(u)` (https + `*.public.blob.vercel-storage.com`) | `lib/property-input.ts:32` |
@@ -94,6 +96,10 @@ Inconsistent action return shapes (`{error}`, `{error,ok}`, `{errors,values,mess
   Server Action and are type-checked by magic bytes.
 - **Linking an existing Stripe `acct_` is admin-only** (`linkPartnerStripeAccountAction`, rejects ids already linked to
   another partner). Partners can only create accounts via Stripe-hosted onboarding.
+- **Repair requests (2026-11-01):** partners only for their own `approved` properties; tenants only for
+  `currentPropertyId` (the home they live in / pay rent on). Partners see all requests on properties they currently own
+  (looked up by property, so ownership transfers move visibility), with tenant identity stripped. Photos encrypted in
+  Mongo (max 3, 4 MB total), served only via the auth-checked route; requester, owning partner and admin may view.
 - **Sessions are revocable:** password change/reset bumps `users.sessionVersion`; admin sessions last 8h.
 
 ## 6. Review findings (2026-10-30)

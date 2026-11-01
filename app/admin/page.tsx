@@ -5,6 +5,7 @@ import { listTenants } from '@/lib/tenants'
 import { listAllRequests } from '@/lib/moveins'
 import { listAllPayoutRequests } from '@/lib/payouts'
 import { listAllInvoices } from '@/lib/invoices'
+import { countActiveRepairs } from '@/lib/repairs'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
@@ -14,12 +15,13 @@ export const metadata: Metadata = { title: 'Admin' }
 
 export default async function AdminPage() {
   await requireRole('admin', '/admin/login')
-  const [properties, tenants, requests, payouts, invoices] = await Promise.all([
+  const [properties, tenants, requests, payouts, invoices, activeRepairs] = await Promise.all([
     listAllProperties(),
     listTenants(),
     listAllRequests(),
     listAllPayoutRequests(),
     listAllInvoices(),
+    countActiveRepairs(),
   ])
   const pending = properties.filter((p) => p.status === 'pending').length
   const pendingTenants = tenants.filter((t) => t.status === 'pending').length
@@ -72,6 +74,20 @@ export default async function AdminPage() {
             </Text>
           </div>
           <ButtonLink href="/admin/move-ins">Review move-ins</ButtonLink>
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Repair requests</h3>
+            <Text className="text-sm/6">
+              <p>
+                {activeRepairs} request{activeRepairs === 1 ? '' : 's'} open, scheduled or in progress.
+              </p>
+            </Text>
+          </div>
+          <ButtonLink href="/admin/repairs">Review repairs</ButtonLink>
         </div>
       </Card>
 

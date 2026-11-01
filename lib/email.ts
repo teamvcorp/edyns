@@ -200,6 +200,57 @@ export async function sendSecurityAlert(input: { subject: string; body: string }
   await sendEmail({ to, subject: `[edynsgate security] ${input.subject}`, html })
 }
 
+/**
+ * New repair request → ops inbox (ALERT_EMAIL, falling back to FROM_EMAIL).
+ * Emergencies are flagged in the subject so they stand out. Only the address,
+ * category and the request text are included — no requester contact details;
+ * the admin opens the request page for those. Best-effort for callers.
+ */
+export async function sendRepairAlert(input: {
+  repairId: string
+  urgency: 'emergency' | 'urgent' | 'routine'
+  requesterRole: 'partner' | 'tenant'
+  address: string
+  category: string
+  title: string
+  description: string
+}): Promise<void> {
+  const to = process.env.ALERT_EMAIL ?? process.env.FROM_EMAIL
+  if (!to) return
+  const url = `${baseUrl}/admin/repairs/${input.repairId}`
+  const tag = input.urgency === 'emergency' ? '[EMERGENCY] ' : input.urgency === 'urgent' ? '[Urgent] ' : ''
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">${escapeHtml(tag)}New repair request</h2>
+      <p><strong>${escapeHtml(input.address)}</strong><br/>
+      ${escapeHtml(input.category)} · ${escapeHtml(input.urgency)} · from the ${escapeHtml(input.requesterRole)}</p>
+      <p><strong>${escapeHtml(input.title)}</strong></p>
+      <p style="white-space:pre-wrap">${escapeHtml(input.description)}</p>
+      <p><a href="${escapeHtml(url)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Open request</a></p>
+    </div>`
+  await sendEmail({ to, subject: `${tag}Repair request — ${input.title}`, html })
+}
+
+/** Tell the requester their repair request changed status (with the admin's note, if any). */
+export async function sendRepairStatusEmail(input: {
+  to: string
+  name: string
+  portalPath: '/partners/repairs' | '/tenants/repairs'
+  title: string
+  statusLabel: string
+  note?: string
+}): Promise<void> {
+  const url = `${baseUrl}${input.portalPath}`
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Repair update, ${escapeHtml(input.name)}</h2>
+      <p>Your request <strong>${escapeHtml(input.title)}</strong> is now <strong>${escapeHtml(input.statusLabel)}</strong>.</p>
+      ${input.note ? `<p style="white-space:pre-wrap">${escapeHtml(input.note)}</p>` : ''}
+      <p><a href="${escapeHtml(url)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View your requests</a></p>
+    </div>`
+  await sendEmail({ to: input.to, subject: `Repair update: ${input.statusLabel} — ${input.title}`, html })
+}
+
 /** Partner equity report for one property: YTD + lifetime totals and a line per payment. */
 export async function sendEquityReportEmail(input: {
   to: string

@@ -294,6 +294,21 @@ export default async function TenantPortalPage({
         )}
       </Card>
 
+      {/* Repairs — only once they live in one of our homes (lib/repairs.ts eligibility). */}
+      {tenant.currentPropertyId && (
+        <Card className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-col">
+              <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Repairs</h3>
+              <Text className="text-sm/6">
+                <p>Something broken at home? Send a repair request and track its progress.</p>
+              </Text>
+            </div>
+            <ButtonLink href="/tenants/repairs">Request a repair</ButtonLink>
+          </div>
+        </Card>
+      )}
+
       {/* Move-in requests */}
       {requestRows.length > 0 && (
         <Card className="flex flex-col gap-4">

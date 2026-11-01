@@ -3,6 +3,7 @@ import 'server-only'
 import { Binary, ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 import { encryptBuffer, decryptBuffer } from './crypto'
+import { sniffFileType, type SniffedType } from './files'
 
 /**
  * Paystubs — ADMIN-ONLY, last-resort income evidence.
@@ -24,7 +25,7 @@ import { encryptBuffer, decryptBuffer } from './crypto'
 /** Stay under Vercel's ~4.5MB request-body cap (next.config.ts sets the action limit to 5mb). */
 export const MAX_PAYSTUB_BYTES = 4 * 1024 * 1024
 
-export type PaystubType = 'application/pdf' | 'image/jpeg' | 'image/png' | 'image/webp'
+export type PaystubType = SniffedType
 
 interface PaystubDoc {
   _id: ObjectId
@@ -50,21 +51,6 @@ async function paystubsCollection(): Promise<Collection<PaystubDoc>> {
   return col
 }
 
-/**
- * Identify the file from its first bytes ("magic numbers"). The browser's
- * declared type and the filename are attacker-controlled, so we ignore them.
- * Returns null for anything that isn't a PDF/JPEG/PNG/WebP.
- */
-export function sniffPaystubType(buf: Buffer): PaystubType | null {
-  if (buf.subarray(0, 5).toString('latin1') === '%PDF-') return 'application/pdf'
-  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg'
-  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'
-  if (buf.subarray(0, 4).toString('latin1') === 'RIFF' && buf.subarray(8, 12).toString('latin1') === 'WEBP') {
-    return 'image/webp'
-  }
-  return null
-}
-
 export type SavePaystubResult =
   | { ok: true; contentType: PaystubType; uploadedAt: Date }
   | { ok: false; error: 'missing' | 'too-big' | 'bad-type' }
@@ -75,7 +61,7 @@ export async function savePaystubFile(tenantId: string, file: File | null): Prom
   if (file.size > MAX_PAYSTUB_BYTES) return { ok: false, error: 'too-big' }
 
   const bytes = Buffer.from(await file.arrayBuffer())
-  const contentType = sniffPaystubType(bytes)
+  const contentType = sniffFileType(bytes) // by magic bytes, not the browser's claim
   if (!contentType) return { ok: false, error: 'bad-type' }
 
   const uploadedAt = new Date()

@@ -95,6 +95,18 @@ export default async function PartnerPortalPage() {
           <ButtonLink href="/partners/payouts">Manage payouts</ButtonLink>
         </div>
       </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Repairs</h3>
+            <Text className="text-sm/6">
+              <p>Report a problem with an approved property and track requests from your tenants.</p>
+            </Text>
+          </div>
+          <ButtonLink href="/partners/repairs">Repairs</ButtonLink>
+        </div>
+      </Card>
     </PortalShell>
   )
 }

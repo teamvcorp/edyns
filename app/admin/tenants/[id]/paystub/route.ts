@@ -1,12 +1,6 @@
 import { sessionWithRole } from '@/lib/dal'
 import { readPaystubFile } from '@/lib/paystubs'
-
-const extension: Record<string, string> = {
-  'application/pdf': 'pdf',
-  'image/jpeg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-}
+import { EXTENSION } from '@/lib/files'
 
 /**
  * Admin-only viewer for a tenant's encrypted paystub. This is the ONLY way to
@@ -25,7 +19,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     headers: {
       'Content-Type': file.contentType,
       // Inline so PDFs/images open in the browser tab; fixed filename (no user input).
-      'Content-Disposition': `inline; filename="paystub.${extension[file.contentType] ?? 'bin'}"`,
+      'Content-Disposition': `inline; filename="paystub.${EXTENSION[file.contentType]}"`,
       // PII: never store in browser/CDN caches.
       'Cache-Control': 'private, no-store, max-age=0',
       // Content type was verified from the file's bytes; forbid the browser from guessing otherwise.
