@@ -142,6 +142,11 @@ Decisions (don't undo):
   and optional `pm_` for tenants who pay through Stripe outside the in-app checkout. Payment method must already be
   attached to that customer (`resolveCustomerPaymentMethod`); customer can't be linked to two tenants or swapped under
   live rent; live subscriptions are re-pointed to the linked method. Labels via `describePaymentMethod` (last 4 only).
+- **Pause / resume** (`pauseRentAction` / `resumeRentAction`): prefer over cancel + restart. Stripe
+  `pause_collection: { behavior: 'void', resumes_at? }` — drafts voided, tenant not charged, no equity. `billing.pause`
+  records `source` ('admin' | 'income_check'); income-check pauses still need "Reconfirm income & resume". Webhook
+  `customer.subscription.updated` → `syncPauseFromStripe` makes Stripe the source of truth (auto-resume date,
+  dashboard pauses). Admin resume updates locally only after Stripe confirms.
 - Every admin Stripe mutation uses a form nonce as the idempotency key; audit trail in `tenant.billingHistory` /
   `tenant.rentCredits`; tenant is emailed on every change/credit.
 

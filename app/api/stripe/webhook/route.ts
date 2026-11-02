@@ -3,6 +3,7 @@ import { getStripe, invoiceSubscriptionId } from '@/lib/stripe'
 import {
   applyFeeResult,
   setBillingStatusBySubscription,
+  syncPauseFromStripe,
   getTenantBySubscriptionId,
   type BillingStatus,
 } from '@/lib/tenants'
@@ -114,7 +115,15 @@ export async function POST(request: Request): Promise<Response> {
   } else if (event.type === 'customer.subscription.updated') {
     const sub = event.data.object as Stripe.Subscription
     const status = mapSubscriptionStatus(sub.status)
-    if (status) await setBillingStatusBySubscription(sub.id, status)
+    // Pause state comes from Stripe: covers admin pauses, dashboard pauses, and
+    // automatic resume on the pause's resumes_at date.
+    const pc = sub.pause_collection
+    if (pc) {
+      await syncPauseFromStripe(sub.id, { resumesAt: pc.resumes_at ? new Date(pc.resumes_at * 1000) : undefined }, status ?? 'active')
+    } else if (status) {
+      await syncPauseFromStripe(sub.id, null, status)
+    }
+    if (status) await setBillingStatusBySubscription(sub.id, status) // no-op while paused
   } else if (event.type === 'customer.subscription.deleted') {
     const sub = event.data.object as Stripe.Subscription
     await setBillingStatusBySubscription(sub.id, 'canceled')

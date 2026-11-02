@@ -57,6 +57,13 @@ export interface Billing {
   imported?: boolean
   /** Next scheduled draft, set when an admin changes the terms (else see firstDraftAt / Stripe). */
   nextDraftAt?: Date
+  /**
+   * Present while status is 'paused'. `source` tells who paused it: an admin
+   * (manual, optional auto-resume date) or the monthly income check (resume only
+   * after income is reconfirmed). Records without it predate this field and were
+   * income-check pauses.
+   */
+  pause?: { at: Date; source: 'admin' | 'income_check'; reason?: string; resumesAt?: Date }
 }
 
 /** Audit entry for an admin change to rent terms (amount / frequency / next draft date). */
@@ -577,6 +584,73 @@ export async function linkStripeCustomer(
   return res.matchedCount === 1
 }
 
+/**
+ * Admin pause (after Stripe accepted it). Only from a live, unpaused state.
+ * Returns false if the tenant wasn't in a pausable state.
+ */
+export async function pauseBillingByAdmin(
+  tenantId: string,
+  pause: { reason?: string; resumesAt?: Date },
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'billing.status': { $in: ['active', 'past_due'] } },
+    {
+      $set: {
+        'billing.status': 'paused',
+        'billing.pause': { at: new Date(), source: 'admin', ...pause },
+        updatedAt: new Date(),
+      },
+    },
+  )
+  return res.matchedCount === 1
+}
+
+/** Admin resume of an ADMIN pause (after Stripe accepted it). */
+export async function resumeBillingByAdmin(tenantId: string): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'billing.status': 'paused' },
+    { $set: { 'billing.status': 'active', updatedAt: new Date() }, $unset: { 'billing.pause': '' } },
+  )
+  return res.matchedCount === 1
+}
+
+/**
+ * Webhook sync (customer.subscription.updated): Stripe is the source of truth
+ * for pause state. Paused in Stripe → 'paused' here (recording a dashboard
+ * pause if we didn't start it). Not paused in Stripe but paused here (auto-
+ * resume date reached, or unpaused in the dashboard) → take Stripe's status.
+ * Income-review flags are left in place for the admin to clear.
+ */
+export async function syncPauseFromStripe(
+  subscriptionId: string,
+  stripePaused: { resumesAt?: Date } | null,
+  status: BillingStatus,
+): Promise<void> {
+  const col = await tenantsCollection()
+  const now = new Date()
+  if (stripePaused) {
+    await col.updateOne(
+      { 'billing.stripeSubscriptionId': subscriptionId, 'billing.status': { $ne: 'paused' } },
+      {
+        $set: {
+          'billing.status': 'paused',
+          'billing.pause': { at: now, source: 'admin', reason: 'Paused in Stripe', ...stripePaused },
+          updatedAt: now,
+        },
+      },
+    )
+    return
+  }
+  await col.updateOne(
+    { 'billing.stripeSubscriptionId': subscriptionId, 'billing.status': 'paused' },
+    { $set: { 'billing.status': status, updatedAt: now }, $unset: { 'billing.pause': '' } },
+  )
+}
+
 /** Append an alternative-payment credit (already applied in Stripe) to the tenant's audit log. Idempotent. */
 export async function recordRentCredit(tenantId: string, credit: RentCredit): Promise<boolean> {
   if (!ObjectId.isValid(tenantId)) return false
@@ -625,6 +699,7 @@ export async function pauseBillingForReview(tenantId: string, reason: string): P
     {
       $set: {
         'billing.status': 'paused',
+        'billing.pause': { at: new Date(), source: 'income_check', reason },
         flaggedForReview: true,
         reviewReason: reason,
         flaggedAt: new Date(),
@@ -642,7 +717,7 @@ export async function resumeBilling(tenantId: string, nextCheckAt: Date): Promis
     { _id: new ObjectId(tenantId) },
     {
       $set: { 'billing.status': 'active', nextIncomeCheckAt: nextCheckAt, updatedAt: new Date() },
-      $unset: { flaggedForReview: '', reviewReason: '', flaggedAt: '' },
+      $unset: { flaggedForReview: '', reviewReason: '', flaggedAt: '', 'billing.pause': '' },
     },
   )
 }

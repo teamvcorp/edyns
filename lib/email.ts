@@ -271,6 +271,28 @@ export async function sendRentChangeEmail(input: {
   await sendEmail({ to: input.to, subject: 'Your rent schedule has changed', html })
 }
 
+/** Tell a tenant their rent was paused or resumed by our team. */
+export async function sendRentPauseEmail(input: {
+  to: string
+  name: string
+  paused: boolean
+  resumesOn?: string
+}): Promise<void> {
+  const body = input.paused
+    ? `<p>Your rent drafts are <strong>paused</strong> — you won’t be charged while the pause is on${
+        input.resumesOn ? `. Drafting resumes automatically on <strong>${escapeHtml(input.resumesOn)}</strong>` : ''
+      }.</p>`
+    : '<p>Your rent drafts have <strong>resumed</strong> on your usual schedule.</p>'
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Rent update, ${escapeHtml(input.name)}</h2>
+      ${body}
+      <p><a href="${escapeHtml(`${baseUrl}/tenants`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View your portal</a></p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: input.paused ? 'Your rent is paused' : 'Your rent has resumed', html })
+}
+
 /** Receipt for a payment made outside Stripe, credited to the tenant's next rent draft(s). */
 export async function sendRentCreditEmail(input: {
   to: string

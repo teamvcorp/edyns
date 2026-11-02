@@ -16,6 +16,7 @@ import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
 import { RentAdjustForm } from '@/components/admin/rent-adjust-form'
 import { RentCreditForm } from '@/components/admin/rent-credit-form'
 import { StripeLinkForm } from '@/components/admin/stripe-link-form'
+import { RentPauseForm } from '@/components/admin/rent-pause-form'
 import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
@@ -532,7 +533,8 @@ export default async function AdminTenantReviewPage({
                     </form>
                   </div>
                 )}
-                {t.billing.status === 'paused' && (
+                {/* Income-check pause (or legacy pause with no source): needs income reconfirmed. */}
+                {t.billing.status === 'paused' && t.billing.pause?.source !== 'admin' && (
                   <div className="flex flex-col gap-2 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
                     <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
                       Rent is paused — the monthly income check found no recent income. Reconfirm the tenant still has
@@ -571,6 +573,33 @@ export default async function AdminTenantReviewPage({
                         nextDraft: '',
                       }}
                       minDate={tomorrowDateInput()}
+                    />
+                  </div>
+                )}
+
+                {/* Admin pause / resume — prefer this over canceling. */}
+                {(t.billing.status === 'active' ||
+                  t.billing.status === 'past_due' ||
+                  (t.billing.status === 'paused' && t.billing.pause?.source === 'admin')) && (
+                  <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                    <h4 className="font-semibold text-olive-950 dark:text-white">
+                      {t.billing.status === 'paused' ? 'Rent is paused' : 'Pause rent'}
+                    </h4>
+                    <RentPauseForm
+                      tenantId={t.id}
+                      nonce={randomUUID()}
+                      minDate={tomorrowDateInput()}
+                      paused={
+                        t.billing.status === 'paused' && t.billing.pause
+                          ? {
+                              since: new Date(t.billing.pause.at).toLocaleDateString(),
+                              reason: t.billing.pause.reason,
+                              resumesOn: t.billing.pause.resumesAt
+                                ? new Date(t.billing.pause.resumesAt).toLocaleDateString()
+                                : undefined,
+                            }
+                          : undefined
+                      }
                     />
                   </div>
                 )}

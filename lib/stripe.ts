@@ -492,3 +492,44 @@ export async function paymentMethodLabel(paymentMethodId: string): Promise<strin
     return null
   }
 }
+
+/**
+ * Pause rent: `pause_collection.behavior: 'void'` — Stripe keeps the
+ * subscription but voids each invoice while paused, so the tenant is NOT
+ * charged and owes nothing for those periods (and no partner equity accrues,
+ * since nothing is paid). Optional `resumesAt`: Stripe resumes by itself then;
+ * our webhook syncs the status back to active.
+ */
+export async function pauseRentSubscription(
+  subscriptionId: string,
+  resumesAt: Date | undefined,
+  idempotencyKey: string,
+): Promise<boolean> {
+  try {
+    await getStripe().subscriptions.update(
+      subscriptionId,
+      {
+        pause_collection: {
+          behavior: 'void',
+          ...(resumesAt ? { resumes_at: Math.floor(resumesAt.getTime() / 1000) } : {}),
+        },
+      },
+      { idempotencyKey },
+    )
+    return true
+  } catch (err) {
+    logError('stripe/rent-pause', err, { subscriptionId })
+    return false
+  }
+}
+
+/** Resume rent now: clears pause_collection; drafting continues on the existing schedule. */
+export async function resumeRentSubscription(subscriptionId: string): Promise<boolean> {
+  try {
+    await getStripe().subscriptions.update(subscriptionId, { pause_collection: '' })
+    return true
+  } catch (err) {
+    logError('stripe/rent-resume', err, { subscriptionId })
+    return false
+  }
+}

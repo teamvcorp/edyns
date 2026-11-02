@@ -13,6 +13,8 @@ import {
   attachStripeCustomer,
   linkStripeCustomer,
   getTenantByStripeCustomer,
+  pauseBillingByAdmin,
+  resumeBillingByAdmin,
   RENT_CREDIT_METHODS,
   type BillingFrequency,
   type RentCreditMethod,
@@ -27,8 +29,10 @@ import {
   fetchCustomerForImport,
   resolveCustomerPaymentMethod,
   setSubscriptionPaymentMethod,
+  pauseRentSubscription,
+  resumeRentSubscription,
 } from '@/lib/stripe'
-import { sendRentChangeEmail, sendRentCreditEmail } from '@/lib/email'
+import { sendRentChangeEmail, sendRentCreditEmail, sendRentPauseEmail } from '@/lib/email'
 
 /**
  * Admin rent management for tenants who already have rent collection set up:
@@ -423,4 +427,81 @@ export async function linkStripeAction(_prev: RentFormState, formData: FormData)
     return { ok: `Linked ${customerId}, but it has no payment method on file — add one in Stripe, then link again.` }
   }
   return { ok: `Linked ${customerId} with ${pm.label ?? pm.paymentMethodId}.${subNote}` }
+}
+
+/**
+ * Pause rent without canceling (prefer this over cancel + restart): Stripe voids
+ * drafts while paused, so the tenant isn't charged; the subscription, payment
+ * method and history all survive. Optional auto-resume date.
+ */
+export async function pauseRentAction(_prev: RentFormState, formData: FormData): Promise<RentFormState> {
+  await requireRole('admin', '/admin/login')
+
+  const tenantId = String(formData.get('tenantId') ?? '')
+  const reason = String(formData.get('reason') ?? '').trim().slice(0, MAX_NOTE)
+  const resumeRaw = String(formData.get('resumeOn') ?? '').trim()
+  const parsedResume = resumeRaw ? readDate(resumeRaw) : null
+  const resumesAt = parsedResume ?? undefined // blank = pause until resumed manually
+  const nonce = readNonce(formData)
+
+  if (!nonce) return { error: 'This form expired — reload the page and try again.' }
+  if (resumeRaw && !parsedResume) return { error: 'Enter a valid resume date, or leave it blank.' }
+  if (resumesAt && resumesAt.getTime() <= Date.now()) return { error: 'The resume date must be in the future.' }
+  if (resumesAt && resumesAt.getTime() > Date.now() + TWO_YEARS_MS) return { error: 'Choose a resume date within two years.' }
+
+  const tenant = await getTenantById(tenantId)
+  if (!tenant?.billing) return { error: 'This tenant has no rent collection.' }
+  if (tenant.billing.status !== 'active' && tenant.billing.status !== 'past_due') {
+    return { error: `Rent is ${tenant.billing.status} — only active rent can be paused.` }
+  }
+
+  const ok = await pauseRentSubscription(tenant.billing.stripeSubscriptionId, resumesAt, `rent-pause:${nonce}`)
+  if (!ok) return { error: 'Stripe could not pause the subscription. Please try again.' }
+  await pauseBillingByAdmin(tenantId, { reason: reason || undefined, resumesAt })
+
+  let emailNote = ''
+  try {
+    await sendRentPauseEmail({
+      to: tenant.email,
+      name: tenant.name,
+      paused: true,
+      resumesOn: resumesAt?.toLocaleDateString(),
+    })
+  } catch (err) {
+    logError('rent/pause-email', err, { tenantId })
+    emailNote = ' (the email to the tenant failed — let them know directly)'
+  }
+
+  revalidateTenant(tenantId)
+  return {
+    ok: `Rent paused${resumesAt ? ` until ${resumesAt.toLocaleDateString()}` : ''}${emailNote}.`,
+  }
+}
+
+/** Resume an ADMIN pause now. (Income-check pauses use "Reconfirm income & resume".) */
+export async function resumeRentAction(_prev: RentFormState, formData: FormData): Promise<RentFormState> {
+  await requireRole('admin', '/admin/login')
+  const tenantId = String(formData.get('tenantId') ?? '')
+
+  const tenant = await getTenantById(tenantId)
+  if (!tenant?.billing || tenant.billing.status !== 'paused') return { error: 'Rent isn’t paused.' }
+  if (tenant.billing.pause?.source !== 'admin') {
+    return { error: 'This pause came from the income check — use “Reconfirm income & resume rent”.' }
+  }
+
+  // Stripe first: only show "active" here once Stripe really is collecting again.
+  const ok = await resumeRentSubscription(tenant.billing.stripeSubscriptionId)
+  if (!ok) return { error: 'Stripe could not resume the subscription. Please try again.' }
+  await resumeBillingByAdmin(tenantId)
+
+  let emailNote = ''
+  try {
+    await sendRentPauseEmail({ to: tenant.email, name: tenant.name, paused: false })
+  } catch (err) {
+    logError('rent/resume-email', err, { tenantId })
+    emailNote = ' (the email to the tenant failed — let them know directly)'
+  }
+
+  revalidateTenant(tenantId)
+  return { ok: `Rent resumed${emailNote}.` }
 }

@@ -24,6 +24,14 @@ Re-verify if the SDK major version changes.
   pass trial_end, so that never happens.
 - `pause_collection` is untouched by these updates.
 
+## Pausing (prefer over canceling)
+- `subscriptions.update(id, { pause_collection: { behavior: 'void', resumes_at? } })` — verified in SDK types
+  (behavior: 'keep_as_draft' | 'mark_uncollectible' | 'void'). 'void' = invoices generated while paused are voided:
+  customer not charged, nothing owed. With `resumes_at`, Stripe lifts the pause itself on that date and fires
+  `customer.subscription.updated` (pause_collection becomes null).
+- Resume now: `pause_collection: ''` (empty value unsets it).
+- The subscription, its payment method and billing schedule are kept — unlike cancel, which is final.
+
 ## Canceled subscriptions
 - A canceled subscription is final in Stripe — it cannot be resumed/reactivated. "Restart" = create a new
   subscription for the same customer (`createRentSubscription()`).
