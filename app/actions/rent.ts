@@ -11,6 +11,8 @@ import {
   setNextIncomeCheck,
   restartBilling,
   attachStripeCustomer,
+  linkStripeCustomer,
+  getTenantByStripeCustomer,
   RENT_CREDIT_METHODS,
   type BillingFrequency,
   type RentCreditMethod,
@@ -23,6 +25,8 @@ import {
   createRentSubscription,
   subscriptionEnded,
   fetchCustomerForImport,
+  resolveCustomerPaymentMethod,
+  setSubscriptionPaymentMethod,
 } from '@/lib/stripe'
 import { sendRentChangeEmail, sendRentCreditEmail } from '@/lib/email'
 
@@ -354,4 +358,69 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
   return {
     ok: `Rent restarted: ${formatCents(amountCents)} ${frequencyLabel[frequency]}, first draft ${firstDraftAt.toLocaleDateString()}${emailNote}.`,
   }
+}
+
+/**
+ * Manually link a tenant to an EXISTING Stripe customer (cus_…) and, optionally,
+ * a specific payment method (pm_…) — for tenants who already pay through
+ * Stripe but never went through the in-app fee checkout (which is what
+ * normally saves these), so the app wrongly says "no payment method".
+ *
+ * Guards:
+ *  - customer must exist in Stripe and not be linked to a DIFFERENT tenant;
+ *  - the payment method must be attached to that same customer (checked in Stripe);
+ *  - the customer can't be switched while a live subscription bills the old one.
+ * If rent is live, its subscription is pointed at the linked payment method so
+ * future drafts actually use it.
+ */
+export async function linkStripeAction(_prev: RentFormState, formData: FormData): Promise<RentFormState> {
+  await requireRole('admin', '/admin/login')
+
+  const tenantId = String(formData.get('tenantId') ?? '')
+  const customerId = String(formData.get('customerId') ?? '').trim()
+  const paymentMethodId = String(formData.get('paymentMethodId') ?? '').trim()
+
+  if (!/^cus_[A-Za-z0-9]{6,64}$/.test(customerId)) {
+    return { error: 'Enter the Stripe customer id (starts with “cus_”).' }
+  }
+  // pm_ = PaymentMethod; card_/ba_/src_ = older ids Stripe still accepts as payment methods.
+  if (paymentMethodId && !/^(pm|card|ba|src)_[A-Za-z0-9]{6,64}$/.test(paymentMethodId)) {
+    return { error: 'Payment method id should start with “pm_” (or leave it blank to use the customer’s default).' }
+  }
+
+  const tenant = await getTenantById(tenantId)
+  if (!tenant) return { error: 'Tenant not found.' }
+
+  const owner = await getTenantByStripeCustomer(customerId)
+  if (owner && owner.id !== tenantId) {
+    return { error: `That Stripe customer is already linked to another tenant (${owner.name}).` }
+  }
+
+  const billingLive = Boolean(tenant.billing && tenant.billing.status !== 'canceled')
+  if (billingLive && tenant.stripeCustomerId && tenant.stripeCustomerId !== customerId) {
+    return {
+      error: 'Rent is live on a different Stripe customer. Cancel that subscription first, then link the new customer.',
+    }
+  }
+
+  // Validates the customer exists, and that the payment method belongs to it.
+  const pm = await resolveCustomerPaymentMethod(customerId, paymentMethodId || undefined)
+  if (!pm.ok) return { error: pm.error }
+
+  const saved = await linkStripeCustomer(tenantId, customerId, pm.paymentMethodId)
+  if (!saved) return { error: 'Could not save the link. Please try again.' }
+
+  let subNote = ''
+  if (billingLive && pm.paymentMethodId && tenant.billing) {
+    const ok = await setSubscriptionPaymentMethod(tenant.billing.stripeSubscriptionId, pm.paymentMethodId)
+    subNote = ok
+      ? ' Future rent drafts will use it.'
+      : ' Warning: couldn’t update the live subscription — set its payment method in Stripe.'
+  }
+
+  revalidateTenant(tenantId)
+  if (!pm.paymentMethodId) {
+    return { ok: `Linked ${customerId}, but it has no payment method on file — add one in Stripe, then link again.` }
+  }
+  return { ok: `Linked ${customerId} with ${pm.label ?? pm.paymentMethodId}.${subNote}` }
 }

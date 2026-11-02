@@ -15,6 +15,7 @@ import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
 import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
 import { RentAdjustForm } from '@/components/admin/rent-adjust-form'
 import { RentCreditForm } from '@/components/admin/rent-credit-form'
+import { StripeLinkForm } from '@/components/admin/stripe-link-form'
 import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
@@ -32,6 +33,7 @@ import {
   REQUIRED_WEEKLY_HOURS,
   getRentSubscriptionState,
   getCustomerCreditCents,
+  paymentMethodLabel,
 } from '@/lib/stripe'
 
 export const metadata: Metadata = { title: 'Review application' }
@@ -124,6 +126,8 @@ export default async function AdminTenantReviewPage({
       ])
     : [null, null]
   const nextDraftAt = liveRent?.nextDraftAt ?? t.billing?.nextDraftAt ?? t.billing?.firstDraftAt
+  // e.g. "visa •••• 4242" — never the full number.
+  const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
   return (
     <section className="py-16">
@@ -394,7 +398,7 @@ export default async function AdminTenantReviewPage({
               label="Fee"
               value={`${feeLabel[t.fee.status]}${t.fee.offline ? ' (offline)' : ''} · ${formatCurrency(t.fee.amountCents / 100)}`}
             />
-            <Row label="Payment method" value={t.defaultPaymentMethodId ? 'On file' : '—'} />
+            <Row label="Payment method" value={t.defaultPaymentMethodId ? (pmLabel ?? 'On file') : '—'} />
             <Row
               label="Rent collection"
               value={
@@ -417,6 +421,30 @@ export default async function AdminTenantReviewPage({
           {t.status === 'rejected' && t.rejectionReason && (
             <p className="text-sm text-red-600 dark:text-red-400">Reason: {t.rejectionReason}</p>
           )}
+        </Card>
+
+        {/* Manual Stripe link — for tenants who already pay through Stripe outside the app's checkout. */}
+        <Card className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Stripe link</h3>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <Row
+              label="Customer"
+              value={t.stripeCustomerId ? <span className="font-mono">{t.stripeCustomerId}</span> : 'Not linked'}
+            />
+            <Row
+              label="Payment method"
+              value={
+                t.defaultPaymentMethodId ? (
+                  <span>
+                    {pmLabel ?? 'Not found in Stripe'} <span className="font-mono text-xs">({t.defaultPaymentMethodId})</span>
+                  </span>
+                ) : (
+                  'None on file'
+                )
+              }
+            />
+          </dl>
+          <StripeLinkForm tenantId={t.id} customerId={t.stripeCustomerId} />
         </Card>
 
         {(!t.identityVerified || t.fee.status !== 'paid') && (
@@ -618,7 +646,8 @@ export default async function AdminTenantReviewPage({
               </p>
             ) : !t.defaultPaymentMethodId ? (
               <p className="text-sm text-red-600 dark:text-red-400">
-                No saved payment method on file. The application fee must be paid (which saves the method) before rent can
+                No saved payment method on file. The application fee must be paid (which saves the method), or link the
+                tenant’s existing Stripe customer in “Stripe link” above, before rent can
                 be drafted.
               </p>
             ) : (

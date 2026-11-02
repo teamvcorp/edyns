@@ -138,6 +138,10 @@ Decisions (don't undo):
   created via the shared `createRentSubscription` (also used by first-time setup). Refuses unless `subscriptionEnded()`
   confirms the old sub is over (no double billing). Payment method falls back to the Stripe customer's default
   (imported tenants never had one saved locally). Old billing archived in `tenant.previousBillings` (atomic swap).
+- **Manual Stripe link** (`linkStripeAction`, "Stripe link" card on the admin tenant page): link an existing `cus_`
+  and optional `pm_` for tenants who pay through Stripe outside the in-app checkout. Payment method must already be
+  attached to that customer (`resolveCustomerPaymentMethod`); customer can't be linked to two tenants or swapped under
+  live rent; live subscriptions are re-pointed to the linked method. Labels via `describePaymentMethod` (last 4 only).
 - Every admin Stripe mutation uses a form nonce as the idempotency key; audit trail in `tenant.billingHistory` /
   `tenant.rentCredits`; tenant is emailed on every change/credit.
 

@@ -555,6 +555,28 @@ export async function restartBilling(tenantId: string, billing: Billing): Promis
   return res.matchedCount === 1
 }
 
+/**
+ * Admin "Stripe link": set the tenant's Stripe customer and saved payment
+ * method (validated against Stripe by the caller). A null payment method
+ * CLEARS the stored one, so a method from a previous customer never lingers.
+ */
+export async function linkStripeCustomer(
+  tenantId: string,
+  customerId: string,
+  paymentMethodId: string | null,
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const update = paymentMethodId
+    ? { $set: { stripeCustomerId: customerId, defaultPaymentMethodId: paymentMethodId, updatedAt: new Date() } }
+    : {
+        $set: { stripeCustomerId: customerId, updatedAt: new Date() },
+        $unset: { defaultPaymentMethodId: '' as const },
+      }
+  const res = await col.updateOne({ _id: new ObjectId(tenantId) }, update)
+  return res.matchedCount === 1
+}
+
 /** Append an alternative-payment credit (already applied in Stripe) to the tenant's audit log. Idempotent. */
 export async function recordRentCredit(tenantId: string, credit: RentCredit): Promise<boolean> {
   if (!ObjectId.isValid(tenantId)) return false

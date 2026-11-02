@@ -64,6 +64,13 @@ export type ImportedCustomer = {
 
 export type CustomerImportResult = { ok: true; data: ImportedCustomer } | { ok: false; error: string }
 
+/** Human label for a payment method, e.g. "visa •••• 4242" or "bank •••• 6789" (never the full number). */
+export function describePaymentMethod(pm: Stripe.PaymentMethod): string {
+  if (pm.card) return `${pm.card.brand} •••• ${pm.card.last4}`
+  if (pm.us_bank_account) return `bank •••• ${pm.us_bank_account.last4}`
+  return pm.type
+}
+
 /**
  * Look up an existing Stripe customer by id and normalize it for the admin
  * add-tenant flow: demographics to prefill the application, plus the saved
@@ -96,13 +103,7 @@ export async function fetchCustomerForImport(customerId: string): Promise<Custom
       pm = null
     }
   }
-  const paymentMethodLabel = pm
-    ? pm.card
-      ? `${pm.card.brand} •••• ${pm.card.last4}`
-      : pm.us_bank_account
-        ? `bank •••• ${pm.us_bank_account.last4}`
-        : pm.type
-    : null
+  const paymentMethodLabel = pm ? describePaymentMethod(pm) : null
 
   const a = customer.address
   return {
@@ -435,6 +436,59 @@ export async function subscriptionEnded(
     // A deleted/unknown subscription can't charge anyone — treat as ended.
     if (err instanceof Stripe.errors.StripeInvalidRequestError && err.code === 'resource_missing') return { ended: true }
     logError('stripe/subscription-ended-check', err, { subscriptionId })
+    return null
+  }
+}
+
+/**
+ * Resolve the payment method to link for a customer (admin "Stripe link").
+ * - With `paymentMethodId`: it must exist AND already be attached to THIS
+ *   customer — so an admin can't paste in someone else's card by mistake.
+ *   (We never attach a loose method here; attach it in Stripe first.)
+ * - Without: the customer's invoice default, else their most recent method.
+ * Returns pm null if the customer simply has none on file.
+ */
+export async function resolveCustomerPaymentMethod(
+  customerId: string,
+  paymentMethodId?: string,
+): Promise<{ ok: true; paymentMethodId: string | null; label: string | null } | { ok: false; error: string }> {
+  if (!paymentMethodId) {
+    const customer = await fetchCustomerForImport(customerId)
+    if (!customer.ok) return { ok: false, error: customer.error }
+    return { ok: true, paymentMethodId: customer.data.defaultPaymentMethodId, label: customer.data.paymentMethodLabel }
+  }
+  let pm: Stripe.PaymentMethod
+  try {
+    pm = await getStripe().paymentMethods.retrieve(paymentMethodId)
+  } catch (err) {
+    logError('stripe/payment-method-lookup', err)
+    return { ok: false, error: 'No payment method found for that id.' }
+  }
+  const owner = typeof pm.customer === 'string' ? pm.customer : pm.customer?.id
+  if (!owner) {
+    return { ok: false, error: 'That payment method isn’t attached to any customer. Attach it to the customer in Stripe first.' }
+  }
+  if (owner !== customerId) return { ok: false, error: 'That payment method belongs to a different Stripe customer.' }
+  return { ok: true, paymentMethodId: pm.id, label: describePaymentMethod(pm) }
+}
+
+/** Point a live subscription's future drafts at a payment method. */
+export async function setSubscriptionPaymentMethod(subscriptionId: string, paymentMethodId: string): Promise<boolean> {
+  try {
+    await getStripe().subscriptions.update(subscriptionId, { default_payment_method: paymentMethodId })
+    return true
+  } catch (err) {
+    logError('stripe/subscription-payment-method', err, { subscriptionId })
+    return false
+  }
+}
+
+/** Label for a stored payment method id (admin display). Null if Stripe can't find it. */
+export async function paymentMethodLabel(paymentMethodId: string): Promise<string | null> {
+  try {
+    return describePaymentMethod(await getStripe().paymentMethods.retrieve(paymentMethodId))
+  } catch (err) {
+    logError('stripe/payment-method-label', err)
     return null
   }
 }
