@@ -4,6 +4,7 @@ import './globals.css'
 import { Main } from '@/components/elements/main'
 import { Navbar } from '@/components/site/navbar'
 import { Footer } from '@/components/site/footer'
+import { SISTER_PROGRAMS } from '@/lib/sister-programs'
 
 export const metadata: Metadata = {
   title: {
@@ -43,14 +44,8 @@ const orgJsonLd = {
     name: 'VA Corp',
     url: 'https://www.thevacorp.com',
   },
-  sameAs: [
-    'https://www.thevacorp.com',
-    'https://homeschool-plus.com',
-    'https://rallyup.us',
-    'https://thegooddeed.net',
-    'https://spiritofsanta.com',
-    'https://app.fyht4.com',
-  ],
+  // Parent org + every sister program (shared list in lib/sister-programs.ts).
+  sameAs: ['https://www.thevacorp.com', ...SISTER_PROGRAMS.map((p) => p.href)],
 }
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

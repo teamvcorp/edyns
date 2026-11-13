@@ -10,7 +10,7 @@
 
 ## 1. Where to find things (lib/)
 
-All `lib/*.ts` are `server-only` **except** `format.ts` and `tiers.ts` (safe in client components).
+All `lib/*.ts` are `server-only` **except** `format.ts`, `tiers.ts`, `fees.ts` and `sister-programs.ts` (safe in client components).
 
 | Need | Use | File |
 |---|---|---|
@@ -30,6 +30,7 @@ All `lib/*.ts` are `server-only` **except** `format.ts` and `tiers.ts` (safe in 
 | Parse property form | `parsePropertyForm(formData, {admin?})` | `lib/property-input.ts` |
 | Money | `formatCurrency` (whole dollars), `formatCents(cents)` (exact — use for charges), `formatNumber`, `formatAddress` | `lib/format.ts` |
 | Tier labels | `TIERS`, `MIN_TIER`, `MAX_TIER`, `tierLabel(t)` | `lib/tiers.ts` |
+| VA Corp sister programs (client-safe) | `SISTER_PROGRAMS`, `SisterProgram` — feeds footer, home cards (`app/page.tsx` icon map), layout JSON-LD `sameAs`. Never hard-code the list elsewhere. | `lib/sister-programs.ts` |
 | Business constants | `APPLICATION_FEE_CENTS`, `COLLECTION_RATE`, `REQUIRED_WEEKLY_HOURS` | `lib/stripe.ts` |
 | Fee gross-up (client-safe) | `withProcessingFee`, `processingFeeCents` (also re-exported by `lib/stripe.ts`) | `lib/fees.ts` |
 | Stripe client | `getStripe()`; import helpers `fetchCustomerForImport`, `fetchSubscriptionForImport`; `invoiceSubscriptionId(inv)` | `lib/stripe.ts` |

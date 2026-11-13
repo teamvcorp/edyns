@@ -1,5 +1,6 @@
 import { Container } from '@/components/elements/container'
 import { Link } from '@/components/elements/link'
+import { SISTER_PROGRAMS } from '@/lib/sister-programs'
 import { Logo } from './logo'
 
 type FooterLink = { href: string; label: string; external?: boolean }
@@ -26,13 +27,8 @@ const groups: FooterGroup[] = [
   {
     // Sister programs across the VA Corp network — descriptive, dofollow links.
     title: 'Sister programs',
-    links: [
-      { href: 'https://homeschool-plus.com', label: 'Homeschool+ — Education', external: true },
-      { href: 'https://rallyup.us', label: 'RallyUp — Healthcare & debt relief', external: true },
-      { href: 'https://thegooddeed.net', label: 'The Good Deed — Youth Leadership', external: true },
-      { href: 'https://spiritofsanta.com', label: 'Spirit of Santa — Positive Behavior', external: true },
-      { href: 'https://app.fyht4.com', label: 'Black Belt Parenting — Parenting', external: true },
-    ],
+    // Shared list — edit lib/sister-programs.ts, not here.
+    links: SISTER_PROGRAMS.map((p) => ({ href: p.href, label: `${p.name} — ${p.category}`, external: true })),
   },
 ]
 

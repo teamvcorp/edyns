@@ -17,9 +17,8 @@ Parent hub: **VA Corp** — https://www.thevacorp.com
 | Edynsgate | Housing | https://www.edynsgate.com |
 | Homeschool+ | Education | https://homeschool-plus.com |
 | RallyUp | Healthcare & debt relief | https://rallyup.us |
-| The Good Deed | Youth Leadership | https://thegooddeed.net |
+| Yotae | Family coaching | https://yotae.life |
 | Spirit of Santa | Positive Behavior | https://spiritofsanta.com |
-| Black Belt Parenting | Parenting | https://app.fyht4.com |
 
 **When adding your app to the network:** add your own app to this table, and add
 these siblings (everyone except yourself) to your footer + `sameAs`. Do NOT list
@@ -38,9 +37,8 @@ Framework-agnostic — a "Sister programs" group. React/Next example:
     { href: 'https://www.edynsgate.com', label: 'Edynsgate — Housing', external: true },
     { href: 'https://homeschool-plus.com', label: 'Homeschool+ — Education', external: true },
     { href: 'https://rallyup.us', label: 'RallyUp — Healthcare & debt relief', external: true },
-    { href: 'https://thegooddeed.net', label: 'The Good Deed — Youth Leadership', external: true },
+    { href: 'https://yotae.life', label: 'Yotae — Family coaching', external: true },
     { href: 'https://spiritofsanta.com', label: 'Spirit of Santa — Positive Behavior', external: true },
-    { href: 'https://app.fyht4.com', label: 'Black Belt Parenting — Parenting', external: true },
     // ...remove your own app from this list
   ],
 }
@@ -54,9 +52,8 @@ Plain HTML equivalent:
   <a href="https://www.edynsgate.com">Edynsgate — Housing</a>
   <a href="https://homeschool-plus.com">Homeschool+ — Education</a>
   <a href="https://rallyup.us">RallyUp — Healthcare & debt relief</a>
-  <a href="https://thegooddeed.net">The Good Deed — Youth Leadership</a>
+  <a href="https://yotae.life">Yotae — Family coaching</a>
   <a href="https://spiritofsanta.com">Spirit of Santa — Positive Behavior</a>
-  <a href="https://app.fyht4.com">Black Belt Parenting — Parenting</a>
 </nav>
 ```
 
@@ -78,9 +75,8 @@ const orgJsonLd = {
     'https://www.edynsgate.com',
     'https://homeschool-plus.com',
     'https://rallyup.us',
-    'https://thegooddeed.net',
+    'https://yotae.life',
     'https://spiritofsanta.com',
-    'https://app.fyht4.com',
     // ...remove your own URL
   ],
 }

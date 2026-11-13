@@ -203,7 +203,7 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 - **Stripe Checkout sessions MUST set `metadata.type`.** The webhook routes on it (e.g. `type: 'project_invoice'` + `invoiceId` + `phase`). A session without it is treated as a **tenant fee** and misrouted.
 - **Project-invoice flow** (admin-only): propose (`draft`→`sent`, proposal email) → recipient accepts/declines on the public `/invoices/[token]` page → pay in full or 50% deposit via Stripe Checkout → admin completes with a finished-work photo (`completed`, balance-due email). Statuses in `lib/invoices.ts`.
 - **Plaid is the standard Income product** (user tokens + payroll income), **not** CRA — don't "upgrade" the integration to CRA endpoints.
-- **Sister-program cross-links live in 3 synced spots:** footer nav, layout JSON-LD `sameAs`, and `SISTER-APPS.md` / `SEO-BACKLINKS.md`. Change one → change all three.
+- **Sister-program list has one code source: `lib/sister-programs.ts`.** It feeds the footer nav, the home-page "Sister programs" cards, and the layout JSON-LD `sameAs`. When you change it, also update `SISTER-APPS.md` / `SEO-BACKLINKS.md` (other apps copy from those).
 
 ---
 

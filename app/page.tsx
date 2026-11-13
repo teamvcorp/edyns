@@ -12,7 +12,20 @@ import { SunIcon } from '@/components/icons/sun-icon'
 import { HeartIcon } from '@/components/icons/heart-icon'
 import { KeyIcon } from '@/components/icons/key-icon'
 import { ArrowNarrowRightIcon } from '@/components/icons/arrow-narrow-right-icon'
+import { BanknotesIcon } from '@/components/icons/banknotes-icon'
+import { SparklesIcon } from '@/components/icons/sparkles-icon'
 import { SecretAdmin } from '@/components/site/secret-admin'
+import { SISTER_PROGRAMS, type SisterProgram } from '@/lib/sister-programs'
+import type { ComponentProps, ComponentType } from 'react'
+
+// Card icon per sister program. Typed as a full Record so adding a program id in
+// lib/sister-programs.ts without an icon here is a compile error, not a blank card.
+const programIcons: Record<SisterProgram['id'], ComponentType<ComponentProps<'svg'>>> = {
+  'homeschool-plus': EducationCapIcon,
+  rallyup: BanknotesIcon,
+  yotae: SunIcon, // calm (yoga) + energy (taekwondo)
+  'spirit-of-santa': SparklesIcon,
+}
 
 const pillars = [
   {
@@ -127,6 +140,47 @@ export default function Page() {
                 Learn more <ArrowNarrowRightIcon />
               </Link>
             </Card>
+          </div>
+        </Container>
+      </section>
+
+      {/* Sister programs — data lives in lib/sister-programs.ts (shared with footer + JSON-LD) */}
+      <section id="sister-programs" className="py-16">
+        <Container className="flex flex-col gap-12">
+          <div className="flex max-w-2xl flex-col gap-4">
+            <Eyebrow>The VA Corp network</Eyebrow>
+            <Subheading>Sister programs</Subheading>
+            <Text className="text-pretty">
+              <p>edynsgate is one part of a larger system. These programs share the same mission.</p>
+            </Text>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            {SISTER_PROGRAMS.map((program) => {
+              const Icon = programIcons[program.id]
+              return (
+                <Card key={program.id} className="flex flex-col items-start gap-4">
+                  <span className="inline-flex size-10 items-center justify-center rounded-full bg-olive-950/5 text-olive-950 dark:bg-white/10 dark:text-white">
+                    <Icon className="size-5" />
+                  </span>
+                  <div className="flex flex-col gap-1">
+                    <h3 className="text-lg font-semibold text-olive-950 dark:text-white">{program.name}</h3>
+                    <p className="text-sm/6 text-olive-700 dark:text-olive-400">{program.category}</p>
+                  </div>
+                  <Text className="text-sm/6">
+                    <p>{program.description}</p>
+                  </Text>
+                  {/* External link: new tab + rel="noopener" so the opened site can't
+                      reach back via window.opener (reverse tabnabbing). Kept dofollow
+                      (no "nofollow") on purpose for network SEO. mt-auto pins links
+                      to the bottom so cards of different text lengths line up. */}
+                  <Link href={program.href} target="_blank" rel="noopener" className="mt-auto">
+                    Visit {program.name}
+                    <span className="sr-only"> (opens in a new tab)</span>
+                    <ArrowNarrowRightIcon />
+                  </Link>
+                </Card>
+              )
+            })}
           </div>
         </Container>
       </section>
