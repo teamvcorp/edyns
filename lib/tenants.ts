@@ -4,6 +4,7 @@ import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 import { deletePaystubFile } from './paystubs'
 import type { Address } from './users'
+import type { ProgramId } from './programs'
 
 export interface Person {
   name: string
@@ -64,6 +65,27 @@ export interface Billing {
    * income-check pauses.
    */
   pause?: { at: Date; source: 'admin' | 'income_check'; reason?: string; resumesAt?: Date }
+  /**
+   * How `baseAmountCents` divides between rent and car savings (programs with a
+   * car component). Absent for Effort Exchange / imported billing = all rent.
+   * The same split is stamped on the Stripe price metadata, which the webhook
+   * reads so past invoices are never re-split by a later change.
+   */
+  split?: { rentCents: number; carCents: number }
+}
+
+/**
+ * The outside landlord we forward rent to (own_landlord program). The rental
+ * address is the tenant's `address` — they live in the home they're renting.
+ */
+export interface Landlord {
+  name: string
+  phone: string
+  email?: string
+  /** Where the landlord receives rent (mailing address / bill-pay details). Free text. */
+  paymentAddress?: string
+  /** Monthly rent owed to the landlord, per the lease, in cents. */
+  monthlyRentCents: number
 }
 
 /** Audit entry for an admin change to rent terms (amount / frequency / next draft date). */
@@ -107,6 +129,12 @@ export interface TenantDoc {
   adults: Person[] // additional household members 18+
   children: Person[]
   employment: Employment
+  /** Which program they enrolled in (lib/programs.ts). Absent on legacy records = 'effort_exchange'; read via programOf(). */
+  program?: ProgramId
+  /** own_landlord only: who we pay rent to. */
+  landlord?: Landlord
+  /** own_landlord only: lease metadata; the encrypted file lives in `leases` (lib/leases.ts). */
+  lease?: { uploadedAt: Date; contentType: string }
   status: ApplicationStatus
   rejectionReason?: string
   fee: {
@@ -187,6 +215,7 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
   await col.createIndex({ stripeCustomerId: 1 })
   await col.createIndex({ plaidItemId: 1 })
   await col.createIndex({ plaidUserId: 1 })
+  await col.createIndex({ program: 1 })
   return col
 }
 
@@ -215,6 +244,8 @@ export async function createTenantApplication(
     feeAmountCents: number
     /** From an admin invite — see TenantDoc.interestedPropertyId. */
     interestedPropertyId?: string
+    program: ProgramId
+    landlord?: Landlord
   },
 ): Promise<Tenant> {
   const col = await tenantsCollection()
@@ -230,6 +261,9 @@ export async function createTenantApplication(
     adults: input.adults,
     children: input.children,
     employment: input.employment,
+    program: input.program,
+    // Only programs that forward rent carry landlord details (never trust the caller to omit them).
+    landlord: input.program === 'own_landlord' ? input.landlord : undefined,
     status: 'pending',
     fee: { status: 'unpaid', amountCents: input.feeAmountCents },
     interestedPropertyId:
@@ -241,6 +275,13 @@ export async function createTenantApplication(
   }
   await col.insertOne(doc)
   return toTenant(doc)
+}
+
+/** Record that a lease was stored (the file itself is in lib/leases.ts). */
+export async function recordLeaseUpload(tenantId: string, lease: { uploadedAt: Date; contentType: string }): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { lease, updatedAt: new Date() } })
 }
 
 export async function getTenantByUserId(userId: string): Promise<Tenant | null> {

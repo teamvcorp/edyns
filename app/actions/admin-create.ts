@@ -11,37 +11,16 @@ import {
   attachStripeCustomer,
   getTenantByStripeCustomer,
   markFeeCollectedOffline,
-  type Person,
+  recordLeaseUpload,
 } from '@/lib/tenants'
+import { parseTenantForm, formStr, isEmail } from '@/lib/tenant-input'
+import { saveLeaseFile } from '@/lib/leases'
 import { applicationTotalCents, fetchCustomerForImport, type ImportedCustomer } from '@/lib/stripe'
 import { sendCredentialsEmail } from '@/lib/email'
 import type { TenantEnrollState } from '@/app/actions/tenants'
 import type { EnrollState } from '@/app/actions/partners'
 import type { PropertyEditState } from '@/app/actions/admin'
-import { logError, logWarn } from '@/lib/log'
-
-const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-
-function num(v: string): number | null {
-  if (v.trim() === '') return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
-function parsePeople(json: string): Person[] {
-  if (!json) return []
-  try {
-    const arr = JSON.parse(json)
-    if (!Array.isArray(arr)) return []
-    return arr
-      .filter((p) => p && typeof p.name === 'string' && typeof p.dob === 'string')
-      .map((p) => ({ name: String(p.name).trim(), dob: String(p.dob).trim() }))
-      .filter((p) => p.name && p.dob)
-  } catch {
-    logWarn('admin-create', 'malformed people JSON')
-    return []
-  }
-}
+import { logError } from '@/lib/log'
 
 // ---- Prefill from an existing Stripe customer ----
 
@@ -91,42 +70,18 @@ export async function lookupStripeCustomerAction(
  *  fee checkout. */
 export async function createTenantByAdmin(_prev: TenantEnrollState, formData: FormData): Promise<TenantEnrollState> {
   await requireRole('admin', '/admin/login')
-  const get = (k: string) => String(formData.get(k) ?? '').trim()
 
-  const fields = [
-    'name', 'email', 'phone', 'dob',
-    'line1', 'line2', 'city', 'state', 'postalCode', 'country',
-    'employer', 'jobTitle', 'monthlyIncome', 'employerPhone', 'adults', 'children',
-  ]
-  const values: Record<string, string> = {}
-  for (const f of fields) values[f] = get(f)
-  const password = String(formData.get('password') ?? '')
-
-  const errors: Record<string, string> = {}
-  if (!values.name) errors.name = 'Enter the head of household’s name.'
-  if (!values.email) errors.email = 'Enter an email.'
-  else if (!emailRe.test(values.email)) errors.email = 'Enter a valid email.'
-  if (!values.phone) errors.phone = 'Enter a phone number.'
-  if (!values.dob) errors.dob = 'Enter the date of birth.'
-  if (password.length < 8) errors.password = 'Temp password must be at least 8 characters.'
-  if (!values.line1) errors.line1 = 'Enter the street address.'
-  if (!values.city) errors.city = 'Enter the city.'
-  if (!values.state) errors.state = 'Enter the state/region.'
-  if (!values.postalCode) errors.postalCode = 'Enter the postal code.'
-  if (!values.country) errors.country = 'Enter the country.'
-  if (!values.employer) errors.employer = 'Enter the employer.'
-  if (!values.jobTitle) errors.jobTitle = 'Enter the job title.'
-  const monthlyIncome = num(values.monthlyIncome)
-  if (monthlyIncome === null || monthlyIncome < 0) errors.monthlyIncome = 'Enter the monthly income.'
-
-  if (Object.keys(errors).length > 0) return { errors, values }
+  // Same rules as public enrollment (lib/tenant-input.ts), incl. program + lease.
+  const parsed = await parseTenantForm(formData, { mode: 'admin' })
+  const { values, password } = parsed
+  if (!parsed.input) return { errors: parsed.errors, values }
   if (await isEmailTaken(values.email, 'tenant')) {
     return { errors: { email: 'A tenant with this email already exists.' }, values }
   }
 
   // Linking an existing Stripe customer: the posted id is untrusted, so
   // re-fetch it from Stripe and re-check it isn't linked to another tenant.
-  const stripeCustomerId = get('stripeCustomerId')
+  const stripeCustomerId = formStr(formData, 'stripeCustomerId')
   let imported: ImportedCustomer | null = null
   if (stripeCustomerId) {
     const result = await fetchCustomerForImport(stripeCustomerId)
@@ -139,28 +94,18 @@ export async function createTenantByAdmin(_prev: TenantEnrollState, formData: Fo
 
   const user = await createUser({ email: values.email, name: values.name, password, role: 'tenant' })
   const tenant = await createTenantApplication(user.id, {
-    name: values.name,
-    email: values.email,
-    phone: values.phone,
-    dob: values.dob,
-    address: {
-      line1: values.line1,
-      line2: values.line2 || undefined,
-      city: values.city,
-      state: values.state,
-      postalCode: values.postalCode,
-      country: values.country,
-    },
-    adults: parsePeople(values.adults),
-    children: parsePeople(values.children),
-    employment: {
-      employer: values.employer,
-      jobTitle: values.jobTitle,
-      monthlyIncome: monthlyIncome!,
-      employerPhone: values.employerPhone || undefined,
-    },
+    ...parsed.input,
     feeAmountCents: applicationTotalCents(),
   })
+
+  if (parsed.lease) {
+    try {
+      const { uploadedAt } = await saveLeaseFile(tenant.id, parsed.lease)
+      await recordLeaseUpload(tenant.id, { uploadedAt, contentType: parsed.lease.contentType })
+    } catch (err) {
+      logError('admin-create/lease', err, { tenantId: tenant.id })
+    }
+  }
 
   if (imported) {
     await attachStripeCustomer(user.id, imported.customerId, imported.defaultPaymentMethodId ?? undefined)
@@ -194,7 +139,7 @@ export async function createPartnerByAdmin(_prev: EnrollState, formData: FormDat
   const errors: Record<string, string> = {}
   if (!values.name) errors.name = 'Enter the partner’s full name.'
   if (!values.email) errors.email = 'Enter an email address.'
-  else if (!emailRe.test(values.email)) errors.email = 'Enter a valid email address.'
+  else if (!isEmail(values.email)) errors.email = 'Enter a valid email address.'
   if (!values.phone) errors.phone = 'Enter a phone number.'
   if (password.length < 8) errors.password = 'Temp password must be at least 8 characters.'
   if (!values.line1) errors.line1 = 'Enter the street address.'

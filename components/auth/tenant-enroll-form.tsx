@@ -5,6 +5,19 @@ import { Button, SoftButton, PlainButton } from '@/components/elements/button'
 import { enrollTenant, type TenantEnrollState } from '@/app/actions/tenants'
 
 import { inputClass } from '@/components/elements/input'
+import { Link } from '@/components/elements/link'
+import {
+  PROGRAMS,
+  PROGRAM_IDS,
+  DEFAULT_PROGRAM,
+  isProgramId,
+  pct,
+  rateSummary,
+  rentExceedsAffordable,
+  affordableRentFor,
+  type ProgramId,
+} from '@/lib/programs'
+import { formatCurrency } from '@/lib/format'
 
 function Field({
   label,
@@ -17,6 +30,7 @@ function Field({
   inputMode,
   className,
   lockedValue,
+  onValueChange,
 }: {
   label: string
   name: string
@@ -30,6 +44,8 @@ function Field({
   className?: string
   /** Server-supplied value the applicant can't change (invited name/email). */
   lockedValue?: string
+  /** Observe typing without making the input controlled (used for the live rent warning). */
+  onValueChange?: (value: string) => void
 }) {
   const error = state?.errors?.[name]
   return (
@@ -47,6 +63,7 @@ function Field({
         inputMode={inputMode}
         defaultValue={lockedValue ?? (type === 'password' ? undefined : state?.values?.[name])}
         readOnly={lockedValue !== undefined}
+        onChange={onValueChange ? (e) => onValueChange(e.target.value) : undefined}
         aria-invalid={error ? true : undefined}
         className={lockedValue !== undefined ? `${inputClass} opacity-70` : inputClass}
       />
@@ -121,9 +138,12 @@ export function TenantEnrollForm({
   invite,
   initialValues,
   stripeCustomer,
+  program: fixedProgram,
 }: {
   action?: TenantAction
   mode?: 'self' | 'admin'
+  /** Self mode: the program chosen on the enroll page (re-validated server-side). Admin mode picks it in the form. */
+  program?: ProgramId
   /** Present when the applicant arrived via an emailed invite link. */
   invite?: { token: string; name: string; email: string }
   /** Admin prefill (e.g. demographics pulled from a Stripe customer). Inputs are
@@ -140,6 +160,20 @@ export function TenantEnrollForm({
   // first submit, fall back to the prefill by presenting it as initial state.
   const fieldState = state ?? (initialValues ? { values: initialValues } : undefined)
 
+  // Program: fixed by the enroll page for applicants; admins choose it here.
+  const echoed = fieldState?.values?.program
+  const [adminProgram, setAdminProgram] = useState<ProgramId>(isProgramId(echoed) ? echoed : DEFAULT_PROGRAM)
+  const program: ProgramId = admin ? adminProgram : fixedProgram ?? DEFAULT_PROGRAM
+  const def = PROGRAMS[program]
+
+  // Live affordability hint (warn, never block): rent above 30% of income.
+  const [income, setIncome] = useState(fieldState?.values?.monthlyIncome ?? '')
+  const [rent, setRent] = useState(fieldState?.values?.monthlyRent ?? '')
+  const incomeNum = Number(income)
+  const rentNum = Number(rent)
+  const overBudget =
+    def.outsideLandlord && Number.isFinite(incomeNum) && Number.isFinite(rentNum) && rentExceedsAffordable(rentNum, incomeNum)
+
   const cleanAdults = adults.filter((p) => p.name.trim() && p.dob)
   const cleanChildren = children.filter((p) => p.name.trim() && p.dob)
 
@@ -149,6 +183,25 @@ export function TenantEnrollForm({
       <input type="hidden" name="children" value={JSON.stringify(cleanChildren)} />
       {invite && <input type="hidden" name="inviteToken" value={invite.token} />}
       {admin && stripeCustomer && <input type="hidden" name="stripeCustomerId" value={stripeCustomer.id} />}
+      {!admin && <input type="hidden" name="program" value={program} />}
+
+      {admin && (
+        <label className="flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white">
+          Program
+          <select
+            name="program"
+            value={adminProgram}
+            onChange={(e) => isProgramId(e.target.value) && setAdminProgram(e.target.value)}
+            className={inputClass}
+          >
+            {PROGRAM_IDS.map((id) => (
+              <option key={id} value={id}>
+                {PROGRAMS[id].label} — {rateSummary(id)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
 
       <fieldset className="flex flex-col gap-4">
         <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Head of household</legend>
@@ -171,7 +224,9 @@ export function TenantEnrollForm({
       </fieldset>
 
       <fieldset className="flex flex-col gap-4">
-        <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Current address</legend>
+        <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">
+          {def.outsideLandlord ? 'Rental address (the home you rent now)' : 'Current address'}
+        </legend>
         <Field label="Street address" name="line1" state={fieldState} autoComplete="address-line1" />
         <Field label="Apartment, suite, etc." name="line2" state={fieldState} required={false} autoComplete="address-line2" />
         <div className="grid gap-4 sm:grid-cols-2">
@@ -210,10 +265,82 @@ export function TenantEnrollForm({
           <Field label="Job title" name="jobTitle" state={fieldState} />
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Monthly income (USD)" name="monthlyIncome" type="number" inputMode="decimal" state={fieldState} />
+          <Field
+            label="Monthly income (USD)"
+            name="monthlyIncome"
+            type="number"
+            inputMode="decimal"
+            state={fieldState}
+            onValueChange={setIncome}
+          />
           <Field label="Employer phone" name="employerPhone" type="tel" state={fieldState} required={false} />
         </div>
       </fieldset>
+
+      {def.outsideLandlord && (
+        <fieldset className="flex flex-col gap-4">
+          <legend className="mb-2 text-sm font-semibold text-olive-700 dark:text-olive-400">Your landlord & lease</legend>
+          <p className="text-xs text-olive-600 dark:text-olive-500">
+            We collect {pct(def.rentRate)}% of your pay for rent and pay your landlord for you. We’ll use these details
+            to confirm your lease and send payments.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Landlord or property manager" name="landlordName" state={fieldState} />
+            <Field label="Landlord phone" name="landlordPhone" type="tel" state={fieldState} />
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Landlord email" name="landlordEmail" type="email" state={fieldState} required={false} />
+            <Field
+              label="Monthly rent (USD)"
+              name="monthlyRent"
+              type="number"
+              inputMode="decimal"
+              state={fieldState}
+              onValueChange={setRent}
+            />
+          </div>
+          <Field
+            label="Where your landlord receives rent (mailing address or payment portal)"
+            name="landlordPaymentAddress"
+            state={fieldState}
+            required={false}
+          />
+
+          {overBudget && (
+            <div role="status" className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-400/10 dark:text-amber-200">
+              <p className="font-medium">This rent is more than {pct(def.rentRate)}% of your income.</p>
+              <p>
+                {pct(def.rentRate)}% of {formatCurrency(incomeNum)} is about {formatCurrency(affordableRentFor(incomeNum))}{' '}
+                a month. You can still apply. If what we collect doesn’t cover your rent, we’ll let you know each month and
+                offer to collect the difference. We also recommend a home that fits your budget.{' '}
+                <Link href="/properties" className="underline">
+                  See homes in our network
+                </Link>
+              </p>
+            </div>
+          )}
+
+          <label className="flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white">
+            Lease (PDF or photo, up to 4 MB)
+            <input
+              type="file"
+              name="lease"
+              required
+              accept="application/pdf,image/jpeg,image/png,image/webp"
+              aria-invalid={fieldState?.errors?.lease ? true : undefined}
+              className="text-sm text-olive-700 file:mr-3 file:rounded-full file:border-0 file:bg-olive-950/5 file:px-4 file:py-2 file:text-sm file:font-medium file:text-olive-950 dark:text-olive-400 dark:file:bg-white/10 dark:file:text-white"
+            />
+            <span className="text-xs font-normal text-olive-600 dark:text-olive-500">
+              Stored encrypted and only visible to our staff. If the form shows an error, choose the file again.
+            </span>
+            {fieldState?.errors?.lease && (
+              <span role="alert" className="text-xs font-normal text-red-600 dark:text-red-400">
+                {fieldState.errors.lease}
+              </span>
+            )}
+          </label>
+        </fieldset>
+      )}
 
       {admin && (
         <fieldset className="flex flex-col gap-3">
@@ -265,8 +392,8 @@ export function TenantEnrollForm({
             </p>
             <p className="text-xs text-olive-600 dark:text-olive-500">
               By continuing you agree to cover all third-party processing fees: Stripe fees on the application fee and
-              your ongoing rent collection, and any Plaid fees for income verification. These are added to the amounts
-              charged to you.
+              your ongoing collection ({rateSummary(program)} of your pay), and any Plaid fees for income verification.
+              These are added to the amounts charged to you.
             </p>
           </>
         )}

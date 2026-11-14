@@ -30,6 +30,10 @@ All `lib/*.ts` are `server-only` **except** `format.ts`, `tiers.ts`, `fees.ts` a
 | Parse property form | `parsePropertyForm(formData, {admin?})` | `lib/property-input.ts` |
 | Money | `formatCurrency` (whole dollars), `formatCents(cents)` (exact — use for charges), `formatNumber`, `formatAddress` | `lib/format.ts` |
 | Tier labels | `TIERS`, `MIN_TIER`, `MAX_TIER`, `tierLabel(t)` | `lib/tiers.ts` |
+| **Tenant programs (client-safe)** — rates, labels, money math | `PROGRAMS`, `programOf(t)` (legacy → effort_exchange), `isProgramId`, `rateSummary`, `pct`, `splitForIncome(program, monthlyIncome, frequency)` (monthly→per-draft), `perDraftFromMonthly`, `affordableRentFor`, `rentExceedsAffordable`, `AFFORDABLE_RENT_RATE`. **Never hard-code 40%/30%/10%.** | `lib/programs.ts` |
+| Tenant application form parsing (self + admin) | `parseTenantForm(fd, {mode, overrides})` → `{values, errors, password, program, input?, lease?}`; also `isEmail`, `EMAIL_RE`, `formStr`, `num`, `parsePeople` | `lib/tenant-input.ts` |
+| Validate an upload before storing | `checkUpload(file, maxBytes)` → bytes + sniffed type, or `missing/too-big/bad-type` | `lib/files.ts` |
+| Leases (own_landlord; encrypted in Mongo, no URL) | `saveLeaseFile`, `readLeaseFile`, `MAX_LEASE_BYTES`; metadata via `recordLeaseUpload` (`lib/tenants.ts`); viewer route `app/admin/tenants/[id]/lease` | `lib/leases.ts` |
 | VA Corp sister programs (client-safe) | `SISTER_PROGRAMS`, `SisterProgram` — feeds footer, home cards (`app/page.tsx` icon map), layout JSON-LD `sameAs`. Never hard-code the list elsewhere. | `lib/sister-programs.ts` |
 | Business constants | `APPLICATION_FEE_CENTS`, `COLLECTION_RATE`, `REQUIRED_WEEKLY_HOURS` | `lib/stripe.ts` |
 | Fee gross-up (client-safe) | `withProcessingFee`, `processingFeeCents` (also re-exported by `lib/stripe.ts`) | `lib/fees.ts` |
@@ -72,10 +76,10 @@ rely on the private `undoMoveIn` helper's gate — keep an inline gate if refact
 |---|---|---|
 | D1 | Private `Field` component ×5 (partner-edit, property-edit, enroll, tenant-enroll, property-form) | `components/elements/field.tsx` |
 | D2 | Label class string ~23× | `labelClass` in `elements/input.ts` |
-| D4 | `emailRe` ×6 in actions | `lib/validation.ts` → `isEmail` |
-| D5/D6 | `num()` ×3, `parsePeople()` ×2 | `lib/validation.ts` |
-| D7/D8 | Partner & tenant form validation copied between self-enroll and admin-create | `validatePartnerForm` / `validateTenantForm` |
-| D9 | `String(formData.get(k) ?? '').trim()` everywhere | `formStr(fd, k)` |
+| D4 | `emailRe` ×4 left (admin.ts, admin-invites.ts, invoices.ts, partners.ts) — tenant actions now use `isEmail` | import `isEmail` from `lib/tenant-input.ts` |
+| D5/D6 | `num()` left in `lib/property-input.ts`; `parsePeople()` resolved | `num` in `lib/tenant-input.ts` |
+| D7/D8 | Partner form validation copied between self-enroll and admin-create (tenant side resolved → `parseTenantForm`) | `validatePartnerForm` |
+| D9 | `String(formData.get(k) ?? '').trim()` still in most actions | `formStr(fd, k)` in `lib/tenant-input.ts` |
 | D10 | `baseUrl` ×7, **inconsistent trailing-slash strip** | `lib/env.ts` |
 | D11 | Cents formatting `$${(c/100).toFixed(2)}` ×5+ — `formatCents` now exists; migrate old sites | `lib/format.ts` |
 | D12/D13 | Email HTML wrapper + CTA button repeated in `lib/email.ts` | `emailLayout()`, `emailButton()` |

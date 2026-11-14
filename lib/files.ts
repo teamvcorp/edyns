@@ -21,6 +21,25 @@ export function sniffFileType(buf: Buffer): SniffedType | null {
   return null
 }
 
+export type CheckedUpload =
+  | { ok: true; bytes: Buffer; contentType: SniffedType }
+  | { ok: false; error: 'missing' | 'too-big' | 'bad-type' }
+
+/**
+ * Validate an uploaded document BEFORE storing anything: present, under the size
+ * cap, and really a PDF/JPEG/PNG/WebP by its bytes. Lets an action reject a bad
+ * file before it creates accounts or records. (Used by lib/leases.ts; paystubs
+ * predate it and inline the same checks.)
+ */
+export async function checkUpload(file: File | null, maxBytes: number): Promise<CheckedUpload> {
+  if (!file || file.size === 0) return { ok: false, error: 'missing' }
+  if (file.size > maxBytes) return { ok: false, error: 'too-big' }
+  const bytes = Buffer.from(await file.arrayBuffer())
+  const contentType = sniffFileType(bytes)
+  if (!contentType) return { ok: false, error: 'bad-type' }
+  return { ok: true, bytes, contentType }
+}
+
 /** File extension for a sniffed type — used for fixed, non-user-supplied download names. */
 export const EXTENSION: Record<SniffedType, string> = {
   'application/pdf': 'pdf',

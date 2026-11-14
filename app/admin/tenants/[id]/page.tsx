@@ -29,6 +29,7 @@ import {
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
+import { PROGRAMS, programOf, rateSummary, pct, rentExceedsAffordable } from '@/lib/programs'
 import {
   COLLECTION_RATE,
   REQUIRED_WEEKLY_HOURS,
@@ -119,6 +120,13 @@ export default async function AdminTenantReviewPage({
   const t = await getTenantById(id)
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
+  const program = programOf(t)
+  // Affordability check prefers verified income, falling back to what they reported.
+  const incomeForCheck = t.employment.verifiedMonthlyIncome ?? t.employment.monthlyIncome
+  const incomeLabel = t.employment.verifiedMonthlyIncome != null ? 'verified' : 'reported'
+  const rentOverBudget = t.landlord
+    ? rentExceedsAffordable(t.landlord.monthlyRentCents / 100, incomeForCheck)
+    : false
   // Live rent terms + unused credit straight from Stripe (null if Stripe is unreachable).
   const [liveRent, creditCents] = t.billing
     ? await Promise.all([
@@ -215,6 +223,49 @@ export default async function AdminTenantReviewPage({
             </p>
           </Card>
         )}
+
+        {/* Program + (own-landlord) landlord & lease. Program rules: lib/programs.ts */}
+        <Card className="flex flex-col gap-4">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Program</h3>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <Row label="Program" value={PROGRAMS[program].label} />
+            <Row label="Collects" value={`${rateSummary(program)} of pay`} />
+            {t.landlord && (
+              <>
+                <Row label="Landlord" value={t.landlord.name} />
+                <Row label="Landlord phone" value={t.landlord.phone} />
+                <Row label="Landlord email" value={t.landlord.email ?? '—'} />
+                <Row label="Monthly rent (per applicant)" value={formatCents(t.landlord.monthlyRentCents)} />
+                <div className="sm:col-span-2">
+                  <Row label="Landlord receives rent at" value={t.landlord.paymentAddress ?? '—'} />
+                </div>
+              </>
+            )}
+          </dl>
+          {PROGRAMS[program].outsideLandlord && (
+            <p className="text-sm text-olive-950 dark:text-white">
+              Lease:{' '}
+              {t.lease ? (
+                <>
+                  <Link href={`/admin/tenants/${t.id}/lease`} target="_blank" rel="noopener">
+                    View lease
+                  </Link>{' '}
+                  <span className="text-olive-600 dark:text-olive-500">
+                    (uploaded {new Date(t.lease.uploadedAt).toLocaleDateString()})
+                  </span>
+                </>
+              ) : (
+                <span className="text-amber-700 dark:text-amber-400">No lease on file — ask the tenant for one.</span>
+              )}
+            </p>
+          )}
+          {t.landlord && rentOverBudget && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              ⚠️ Rent is more than {pct(PROGRAMS[program].rentRate)}% of {incomeLabel} income — expect monthly shortfalls.
+              Recommend a home they can afford.
+            </p>
+          )}
+        </Card>
 
         <Card className="flex flex-col gap-4">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Head of household</h3>

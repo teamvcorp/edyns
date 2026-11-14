@@ -12,45 +12,25 @@ import {
   attachStripeCustomer,
   setFeeSession,
   setEmploymentType,
-  type Person,
+  recordLeaseUpload,
 } from '@/lib/tenants'
+import { parseTenantForm } from '@/lib/tenant-input'
+import { saveLeaseFile } from '@/lib/leases'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
 import { rateLimit, getClientIp } from '@/lib/ratelimit'
 import { getValidInviteByToken, claimInvite, releaseInvite, linkInviteToTenant } from '@/lib/invites'
 import { getPropertyById } from '@/lib/properties'
-import { logError, logWarn } from '@/lib/log'
+import { logError } from '@/lib/log'
 
 export type TenantEnrollState =
   | { errors?: Record<string, string>; values?: Record<string, string>; message?: string }
   | undefined
 
-const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const baseUrl = process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000'
 
 // Account-creation throttle: cap new applications per IP in a rolling window.
 const SIGNUP_LIMIT = 5
 const SIGNUP_WINDOW_MS = 60 * 60 * 1000
-
-function num(v: string): number | null {
-  if (v.trim() === '') return null
-  const n = Number(v)
-  return Number.isFinite(n) ? n : null
-}
-
-function parsePeople(json: string): Person[] {
-  if (!json) return []
-  try {
-    const arr = JSON.parse(json)
-    if (!Array.isArray(arr)) return []
-    return arr
-      .filter((p) => p && typeof p.name === 'string' && typeof p.dob === 'string')
-      .map((p) => ({ name: String(p.name).trim(), dob: String(p.dob).trim() }))
-      .filter((p) => p.name && p.dob)
-  } catch {
-    logWarn('tenants', 'malformed people JSON')
-    return []
-  }
-}
 
 async function startFeeCheckout(opts: { userId: string; email: string; customerId: string }): Promise<string> {
   const stripe = getStripe()
@@ -87,55 +67,26 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
     return { message: 'Too many applications from this network. Please try again later.' }
   }
 
-  const get = (k: string) => String(formData.get(k) ?? '').trim()
-
-  const fields = [
-    'name', 'email', 'phone', 'dob',
-    'line1', 'line2', 'city', 'state', 'postalCode', 'country',
-    'employer', 'jobTitle', 'monthlyIncome', 'employerPhone',
-    'adults', 'children',
-  ]
-  const values: Record<string, string> = {}
-  for (const f of fields) values[f] = get(f)
-  const password = String(formData.get('password') ?? '')
-
   // Invited applicants: the server-side invite record is authoritative for name,
   // email and the property hint. The browser only carries the opaque token, so
-  // none of these can be altered by editing the form or URL.
+  // none of these can be altered by editing the form or URL. Invites are for
+  // homes we manage, so they always enroll in the Effort Exchange.
   const inviteToken = String(formData.get('inviteToken') ?? '')
   const invite = inviteToken ? await getValidInviteByToken(inviteToken) : null
+
+  const parsed = await parseTenantForm(formData, {
+    mode: 'self',
+    overrides: invite ? { name: invite.name, email: invite.email, program: 'effort_exchange' } : undefined,
+  })
+  const { values } = parsed
+
   if (inviteToken && !invite) {
     return {
       message: 'This invitation link has expired or was already used. Ask us for a new invite, or apply from the public form.',
       values,
     }
   }
-  if (invite) {
-    values.name = invite.name
-    values.email = invite.email
-  }
-
-  const errors: Record<string, string> = {}
-  if (!values.name) errors.name = 'Enter the head of household’s name.'
-  if (!values.email) errors.email = 'Enter an email.'
-  else if (!emailRe.test(values.email)) errors.email = 'Enter a valid email.'
-  if (!values.phone) errors.phone = 'Enter a phone number.'
-  if (!values.dob) errors.dob = 'Enter the date of birth.'
-  if (password.length < 8) errors.password = 'Password must be at least 8 characters.'
-  if (!values.line1) errors.line1 = 'Enter the street address.'
-  if (!values.city) errors.city = 'Enter the city.'
-  if (!values.state) errors.state = 'Enter the state/region.'
-  if (!values.postalCode) errors.postalCode = 'Enter the postal code.'
-  if (!values.country) errors.country = 'Enter the country.'
-  if (!values.employer) errors.employer = 'Enter the employer.'
-  if (!values.jobTitle) errors.jobTitle = 'Enter the job title.'
-  const monthlyIncome = num(values.monthlyIncome)
-  if (monthlyIncome === null || monthlyIncome < 0) errors.monthlyIncome = 'Enter the monthly income.'
-
-  const adults = parsePeople(values.adults)
-  const children = parsePeople(values.children)
-
-  if (Object.keys(errors).length > 0) return { errors, values }
+  if (!parsed.input) return { errors: parsed.errors, values }
 
   if (await isEmailTaken(values.email, 'tenant')) {
     return { errors: { email: 'A tenant account with this email already exists. Please sign in.' }, values }
@@ -157,34 +108,27 @@ export async function enrollTenant(_prev: TenantEnrollState, formData: FormData)
   let checkoutUrl: string
   let applicationCreated = false
   try {
-    const user = await createUser({ email: values.email, name: values.name, password, role: 'tenant' })
+    const user = await createUser({ email: values.email, name: values.name, password: parsed.password, role: 'tenant' })
 
     const tenant = await createTenantApplication(user.id, {
-      name: values.name,
-      email: values.email,
-      phone: values.phone,
-      dob: values.dob,
-      address: {
-        line1: values.line1,
-        line2: values.line2 || undefined,
-        city: values.city,
-        state: values.state,
-        postalCode: values.postalCode,
-        country: values.country,
-      },
-      adults,
-      children,
-      employment: {
-        employer: values.employer,
-        jobTitle: values.jobTitle,
-        monthlyIncome: monthlyIncome!,
-        employerPhone: values.employerPhone || undefined,
-      },
+      ...parsed.input,
       feeAmountCents: applicationTotalCents(),
       interestedPropertyId,
     })
     applicationCreated = true
     if (invite) await linkInviteToTenant(invite.id, tenant.id)
+
+    // Own-landlord applicants: store the (already byte-validated) lease, encrypted.
+    // Non-fatal: the account already exists, so failing here would strand the
+    // applicant. Staff see "no lease on file" in admin and can follow up.
+    if (parsed.lease) {
+      try {
+        const { uploadedAt } = await saveLeaseFile(tenant.id, parsed.lease)
+        await recordLeaseUpload(tenant.id, { uploadedAt, contentType: parsed.lease.contentType })
+      } catch (err) {
+        logError('tenants/enroll/lease', err, { tenantId: tenant.id })
+      }
+    }
 
     // Sign them in now so they can resume payment / see pending status even if they bail on Checkout.
     await createSession({ sub: user.id, role: 'tenant', name: user.name })
