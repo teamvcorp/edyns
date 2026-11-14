@@ -1,12 +1,15 @@
 import React from "react";
 
+// LEGAL REVIEW REQUIRED before launch (2026-11-14): section 1 and 7 now describe
+// the own-landlord and car-savings programs (lib/programs.ts).
+
 export default function PrivacyPolicy() {
   return (
     <main className="max-w-4xl mx-auto px-6 py-12">
       <h1 className="text-3xl font-bold mb-6">Privacy Policy</h1>
 
       <p className="mb-4 text-sm text-gray-600">
-        Last Updated: June 5, 2026
+        Last Updated: November 14, 2026
       </p>
 
       <section className="space-y-6 text-gray-800">
@@ -28,15 +31,23 @@ export default function PrivacyPolicy() {
 
           <ul className="list-disc list-inside mt-3 space-y-1">
             <li>
-              You agree that up to <strong>40% of your income</strong> may be
-              collected.
+              Depending on your program, you agree that up to <strong>40% of your income</strong> may be
+              collected: 40% for the Effort Exchange, 30% for rent plus 10% for car
+              savings for Your Home + Car, or 10% for Car Savings.
             </li>
             <li>
-              These funds are exchanged for housing accommodations and utilities.
+              Effort Exchange funds are exchanged for housing accommodations and
+              utilities and are <strong>retained by the company</strong>.
             </li>
             <li>
-              <strong>All collected proceeds are retained by the company</strong> and
-              are not held in trust, savings, or investment on your behalf.
+              Your Home + Car rent funds are paid to the landlord you name. Car
+              savings are held by the company (not in trust, savings or investment
+              accounts in your name) and released only toward an approved vehicle
+              purchase.
+            </li>
+            <li>
+              For Your Home + Car, we share payment details with your landlord and
+              collect their contact information and your lease to pay your rent.
             </li>
             <li>
               Participation is voluntary and based on your agreement to these terms.
@@ -118,7 +129,7 @@ export default function PrivacyPolicy() {
             By using the platform, you acknowledge:
           </p>
           <ul className="list-disc list-inside mt-2 space-y-1">
-            <li>No savings or ownership is created from payments</li>
+            <li>No ownership is created from payments; car savings are held by the company under program rules</li>
             <li>Funds paid are not recoverable unless explicitly stated</li>
             <li>Service access may depend on continued payment participation</li>
           </ul>

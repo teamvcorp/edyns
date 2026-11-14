@@ -132,8 +132,8 @@ export default function Page() {
               <Subheading className="text-2xl/8 sm:text-3xl/9">Tenants</Subheading>
               <Text className="text-pretty">
                 <p>
-                  The Effort Exchange: work 35 hours a week and your rent and utilities are fully covered — with surplus
-                  saved toward your home.
+                  The Effort Exchange: work 35 hours a week and your rent and utilities are fully covered. Renting
+                  elsewhere? We can pay your landlord and help you save for a car.
                 </p>
               </Text>
               <Link href="/programs/tenants">

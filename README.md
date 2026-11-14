@@ -100,6 +100,7 @@ app/
     tenants/plaid/link-token/   Plaid Link token creation
     partners/upload/, tenants/upload/   Vercel Blob client uploads
     cron/income-check/    Daily income re-check (vercel.json cron + CRON_SECRET)
+    cron/rent-shortfall/  Monthly (27th) own-landlord rent shortfall notice + email
 lib/
   mongodb.ts              Lazy, cached MongoClient (getDb())
   session.ts              jose JWT cookie sessions (create/get/delete)
@@ -187,7 +188,7 @@ All major services are **wired** behind `lib/<service>.ts` clients:
 
 - **MongoDB** → `lib/mongodb.ts`. Collections: users, tenants, properties, move-ins, payouts, equity, invoices, rate limits.
 - **Vercel Blob** → client uploads via `handleUpload` (`app/api/partners/upload`, `app/api/tenants/upload`): property photos, paystubs, invoice work photos.
-- **Stripe** → tenant billing (checkout + subscriptions, incl. importing existing subscriptions by ID), project invoices, webhook at `app/api/stripe/webhook/route.ts`. Business constants in `lib/stripe.ts`: $25 application fee, 40% collection rate, 35 required weekly hours.
+- **Stripe** → tenant billing (checkout + subscriptions, incl. importing existing subscriptions by ID), project invoices, webhook at `app/api/stripe/webhook/route.ts`. Business constants in `lib/stripe.ts`: $25 application fee, 35 required weekly hours; per-program collection rates in `lib/programs.ts`.
 - **Stripe Identity** → ID + selfie verification (`app/api/identity/*`); replication guide in `docs/stripe-identity-setup.md`.
 - **Plaid** → income verification via **user tokens + payroll income** (standard Income product, **not** CRA). Access tokens encrypted at rest with `EE_ENCRYPTION_KEY`. Daily re-check via the cron route. Sandbox/e2e probe scripts in `scripts/`.
 - **Resend** → credentials, welcome-back, approval, security-alert, equity-report, and project-invoice emails (`lib/email.ts`). Invoice mail sends from `INVOICE_FROM_EMAIL` with `INVOICE_REPLY_TO`.
@@ -199,8 +200,15 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 
 ## Business rules (do not get these wrong)
 
-- **Eligibility = effort, never income.** Tenant approval is based **only** on the 35-hr/week effort commitment. Income is **never** an approval criterion — Plaid income data is used solely to set the rent amount (40% of verified monthly income, `COLLECTION_RATE` in `lib/stripe.ts`).
-- **Stripe Checkout sessions MUST set `metadata.type`.** The webhook routes on it (e.g. `type: 'project_invoice'` + `invoiceId` + `phase`). A session without it is treated as a **tenant fee** and misrouted.
+- **Eligibility = effort, never income.** Tenant approval is based **only** on the 35-hr/week effort commitment (every program). Income is **never** an approval criterion — Plaid income data is used solely to set the collection amount.
+- **Three tenant programs, one source of rates: `lib/programs.ts`** (never hard-code a percentage):
+  - **Effort Exchange** — 40% of pay as rent for a home we manage; partner equity accrues.
+  - **Your Home + Car** (`own_landlord`) — 30% rent (staff pay the tenant's outside landlord manually and record it) + 10% car savings. Applicant gives landlord details + uploads a lease (encrypted, `lib/leases.ts`). Rent over 30% of income is **warned, never blocked**.
+  - **Car Savings** (`car_only`) — 10% car savings, released only toward an admin-approved car offer (`lib/car-offers.ts`).
+  - Program money is tracked in the append-only **program ledger** (`lib/program-ledger.ts`) — it is **not revenue** and never earns partner equity. Landlord payments can't exceed rent on hand.
+  - One Stripe subscription per tenant; the rent/car split is stamped on the **price metadata** and read per invoice by the webhook (`invoiceRentSplit`).
+  - Month-end shortfall: cron `/api/cron/rent-shortfall` (27th) emails own-landlord tenants a balance + one-time "pay the difference" Checkout.
+- **Stripe Checkout sessions MUST set `metadata.type`.** The webhook routes on it (`'project_invoice'` + `invoiceId` + `phase`; `'rent_shortfall'` + `tenantId` + `month` + `baseCents`). A session without it is treated as a **tenant fee** and misrouted.
 - **Project-invoice flow** (admin-only): propose (`draft`→`sent`, proposal email) → recipient accepts/declines on the public `/invoices/[token]` page → pay in full or 50% deposit via Stripe Checkout → admin completes with a finished-work photo (`completed`, balance-due email). Statuses in `lib/invoices.ts`.
 - **Plaid is the standard Income product** (user tokens + payroll income), **not** CRA — don't "upgrade" the integration to CRA endpoints.
 - **Sister-program list has one code source: `lib/sister-programs.ts`.** It feeds the footer nav, the home-page "Sister programs" cards, and the layout JSON-LD `sameAs`. When you change it, also update `SISTER-APPS.md` / `SEO-BACKLINKS.md` (other apps copy from those).
@@ -214,7 +222,7 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 - **`@/*` path alias** maps to the **project root** (see `tsconfig.json`), e.g. `@/components/...`, `@/lib/...`.
 - **Mongo client is lazy** — it connects on first `getDb()`, not at import, so `next build` works without a reachable DB.
 - **`demo/` is gone** — the reference kit was deleted after its pieces were absorbed into `components/`.
-- **Cron:** `vercel.json` schedules `/api/cron/income-check` daily at 12:00 UTC; the route requires the `CRON_SECRET` bearer token.
+- **Cron:** `vercel.json` schedules `/api/cron/income-check` daily at 12:00 UTC and `/api/cron/rent-shortfall` on the 27th at 15:00 UTC; both require the `CRON_SECRET` bearer token.
 - **Verify with `npm run build`** — there is no test suite; live smoke-testing is done manually.
 
 ---

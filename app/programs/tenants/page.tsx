@@ -10,6 +10,7 @@ import { ClockIcon } from '@/components/icons/clock-icon'
 import { HomeIcon } from '@/components/icons/home-icon'
 import { BanknotesIcon } from '@/components/icons/banknotes-icon'
 import { FingerprintIcon } from '@/components/icons/fingerprint-icon'
+import { ProgramCards } from '@/components/tenants/program-cards'
 import { HeartIcon } from '@/components/icons/heart-icon'
 import { BookOpenIcon } from '@/components/icons/book-open-icon'
 import { ArrowNarrowRightIcon } from '@/components/icons/arrow-narrow-right-icon'
@@ -84,6 +85,23 @@ export default function TenantsProgramPage() {
               See how it works <ArrowNarrowRightIcon />
             </PlainButtonLink>
           </div>
+        </Container>
+      </section>
+
+      {/* Programs — data from lib/programs.ts */}
+      <section id="programs" className="py-16">
+        <Container className="flex flex-col gap-12">
+          <div className="flex max-w-2xl flex-col gap-4">
+            <Eyebrow>Three ways to join</Eyebrow>
+            <Subheading>Pick the program that fits your life.</Subheading>
+            <Text className="text-pretty">
+              <p>
+                Every program asks for 35 hours of work a week and verifies your identity and income. Collection is a
+                share of your pay, drafted automatically.
+              </p>
+            </Text>
+          </div>
+          <ProgramCards />
         </Container>
       </section>
 

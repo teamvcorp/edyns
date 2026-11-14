@@ -10,22 +10,11 @@ import { getValidInviteByToken } from '@/lib/invites'
 import { getPropertyById } from '@/lib/properties'
 import { formatAddress } from '@/lib/format'
 import { tierLabel } from '@/lib/tiers'
-import { ButtonLink } from '@/components/elements/button'
-import { HomeIcon } from '@/components/icons/home-icon'
-import { KeyIcon } from '@/components/icons/key-icon'
-import { BanknotesIcon } from '@/components/icons/banknotes-icon'
-import { PROGRAMS, PROGRAM_IDS, isProgramId, rateSummary, type ProgramId } from '@/lib/programs'
+import { ProgramCards } from '@/components/tenants/program-cards'
+import { PROGRAMS, isProgramId, type ProgramId } from '@/lib/programs'
 import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
-import type { ComponentProps, ComponentType } from 'react'
 
 export const metadata: Metadata = { title: 'Tenant application' }
-
-// Card icon per program. A full Record so adding a program without an icon is a type error.
-const programIcons: Record<ProgramId, ComponentType<ComponentProps<'svg'>>> = {
-  effort_exchange: HomeIcon,
-  own_landlord: KeyIcon,
-  car_only: BanknotesIcon,
-}
 
 export default async function TenantEnrollPage({
   searchParams,
@@ -64,29 +53,7 @@ export default async function TenantEnrollPage({
               </p>
             )}
           </div>
-          <div className="grid gap-6 lg:grid-cols-3">
-            {PROGRAM_IDS.map((id) => {
-              const p = PROGRAMS[id]
-              const Icon = programIcons[id]
-              return (
-                <Card key={id} className="flex flex-col items-start gap-4">
-                  <span className="inline-flex size-10 items-center justify-center rounded-full bg-olive-950/5 text-olive-950 dark:bg-white/10 dark:text-white">
-                    <Icon className="size-5" />
-                  </span>
-                  <div className="flex flex-col gap-1">
-                    <h2 className="text-lg font-semibold text-olive-950 dark:text-white">{p.label}</h2>
-                    <p className="text-sm/6 font-medium text-olive-700 dark:text-olive-400">{rateSummary(id)} of your pay</p>
-                  </div>
-                  <Text className="text-sm/6">
-                    <p>{p.summary}</p>
-                  </Text>
-                  <ButtonLink href={`/tenants/enroll?program=${id}`} className="mt-auto">
-                    Apply for {p.short}
-                  </ButtonLink>
-                </Card>
-              )
-            })}
-          </div>
+          <ProgramCards headingLevel="h2" />
           <div className="text-sm text-olive-700 dark:text-olive-400">
             Already applied? <Link href="/tenants/login">Sign in</Link>
           </div>
