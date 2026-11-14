@@ -7,6 +7,8 @@ import { resumeApplicationPayment, payShortfallAction } from '@/app/actions/tena
 import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { PROGRAMS, programOf, rateSummary } from '@/lib/programs'
 import { balancesFor } from '@/lib/program-ledger'
+import { affordablePropertiesFor } from '@/lib/affordable-homes'
+import { PublicPropertyCard } from '@/components/properties/public-property-card'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
@@ -64,6 +66,10 @@ export default async function TenantPortalPage({
   const def = PROGRAMS[program]
   // Money edynsgate holds for this tenant (own_landlord / car_only only).
   const funds = !def.managedHousing && tenant.status === 'approved' ? await balancesFor(tenant.id) : null
+  // Homes within budget (rent ≤ 30% of income) for approved tenants not yet in one of our homes.
+  const budgetIncome = tenant.employment.verifiedMonthlyIncome ?? tenant.employment.monthlyIncome
+  const affordable =
+    tenant.status === 'approved' && !tenant.currentPropertyId ? await affordablePropertiesFor(budgetIncome) : null
   const householdSize = 1 + tenant.adults.length + tenant.children.length
 
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
@@ -452,6 +458,35 @@ export default async function TenantPortalPage({
               </div>
             ))}
           </div>
+        </Card>
+      )}
+
+      {/* Homes within budget — the goal is housing they can afford (lib/affordable-homes.ts) */}
+      {affordable && (
+        <Card id="affordable" className="flex flex-col gap-4">
+          <div className="flex flex-col gap-1">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Homes within your budget</h3>
+            <Text className="text-sm/6">
+              <p>
+                Homes in our network with rent of {formatCurrency(affordable.maxRent)}/month or less — 30% of your{' '}
+                {tenant.employment.verifiedMonthlyIncome != null ? 'verified' : 'reported'} income.
+                {tenant.landlord && tenant.landlord.monthlyRentCents / 100 > affordable.maxRent
+                  ? ' Your current rent is above that, so one of these could save you money every month.'
+                  : ''}
+              </p>
+            </Text>
+          </div>
+          {affordable.homes.length > 0 ? (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {affordable.homes.map((p) => (
+                <PublicPropertyCard key={p.id} property={p} />
+              ))}
+            </div>
+          ) : (
+            <Text className="text-sm/6">
+              <p>No homes in that range are open right now. We add homes often — check back soon.</p>
+            </Text>
+          )}
         </Card>
       )}
 

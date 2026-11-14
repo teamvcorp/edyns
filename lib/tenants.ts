@@ -375,6 +375,13 @@ export async function findTenantByProperty(propertyId: string): Promise<Tenant |
   return doc ? toTenant(doc) : null
 }
 
+/** Ids of every property a tenant currently lives in (occupied homes). */
+export async function listOccupiedPropertyIds(): Promise<Set<string>> {
+  const col = await tenantsCollection()
+  const ids = await col.distinct('currentPropertyId', { currentPropertyId: { $exists: true } })
+  return new Set(ids.filter(Boolean).map((id) => String(id)))
+}
+
 /** True if a tenant is placed at this property with active rent billing (i.e. rented). */
 export async function isPropertyRented(propertyId: string): Promise<boolean> {
   if (!ObjectId.isValid(propertyId)) return false

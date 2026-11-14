@@ -32,6 +32,11 @@ export function PublicPropertyCard({ property }: { property: Property }) {
           </div>
           <p className="text-sm text-olive-700 dark:text-olive-400">
             Income to qualify: <span className="font-semibold">{formatCurrency(property.incomeRequirement)}/mo</span>
+            {property.monthlyRent ? (
+              <>
+                {' · '}Rent <span className="font-semibold">{formatCurrency(property.monthlyRent)}/mo</span>
+              </>
+            ) : null}
           </p>
         </div>
       </Card>

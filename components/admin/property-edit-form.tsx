@@ -183,6 +183,14 @@ export function PropertyEditForm({
             required={false}
           />
           <Field
+            label="Monthly rent (USD, for affordable-home matching)"
+            name="monthlyRent"
+            type="number"
+            state={state}
+            initial={property?.monthlyRent}
+            required={false}
+          />
+          <Field
             label="Partner equity share (% of rent)"
             name="equitySharePercent"
             type="number"

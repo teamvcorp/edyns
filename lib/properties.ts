@@ -30,6 +30,12 @@ export interface PropertyDoc {
   tier?: number
   /** Minimum tenant monthly income (USD) required to move into this property. */
   incomeRequirement?: number
+  /**
+   * Monthly rent (USD, admin-set) for the affordable-homes list: a home is
+   * recommended when rent ≤ 30% of a tenant's income (lib/programs.ts). Homes
+   * without it are never recommended.
+   */
+  monthlyRent?: number
   status: PropertyStatus
   rejectionReason?: string
   /** True when an admin took this property in on a partner's behalf (audit trail). */
@@ -66,6 +72,7 @@ export interface PropertyInput {
   askingPrice: number
   tier?: number
   incomeRequirement?: number
+  monthlyRent?: number
   equitySharePercent?: number
 }
 

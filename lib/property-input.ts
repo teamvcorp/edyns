@@ -23,7 +23,7 @@ const BASE_FIELDS = [
   'assessedValue', 'askingPrice', 'thumbnailUrl', 'galleryUrls',
 ] as const
 
-const ADMIN_FIELDS = ['status', 'equityGenerated', 'tier', 'incomeRequirement', 'equitySharePercent'] as const
+const ADMIN_FIELDS = ['status', 'equityGenerated', 'tier', 'incomeRequirement', 'equitySharePercent', 'monthlyRent'] as const
 
 const STATUSES: PropertyStatus[] = ['pending', 'approved', 'rejected']
 
@@ -112,6 +112,7 @@ export function parsePropertyForm(formData: FormData, opts: { admin?: boolean } 
   let admin: AdminPropertyFields | undefined
   let tier: number | null = null
   let incomeRequirement: number | null = null
+  let monthlyRent: number | null = null
   if (opts.admin) {
     const status = values.status as PropertyStatus
     if (!STATUSES.includes(status)) errors.status = 'Choose a valid status.'
@@ -120,6 +121,10 @@ export function parsePropertyForm(formData: FormData, opts: { admin?: boolean } 
     tier = num(values.tier)
     incomeRequirement = num(values.incomeRequirement)
     const equitySharePercent = num(values.equitySharePercent)
+    monthlyRent = num(values.monthlyRent)
+    if (values.monthlyRent && (monthlyRent === null || monthlyRent <= 0 || monthlyRent > 100_000)) {
+      errors.monthlyRent = 'Enter the monthly rent in dollars (or leave it blank).'
+    }
     if (equitySharePercent !== null && (equitySharePercent < 0 || equitySharePercent > 100)) {
       errors.equitySharePercent = 'Equity share must be between 0 and 100.'
     }
@@ -166,6 +171,7 @@ export function parsePropertyForm(formData: FormData, opts: { admin?: boolean } 
   if (opts.admin) {
     input.tier = tier ?? undefined
     input.incomeRequirement = incomeRequirement ?? undefined
+    input.monthlyRent = monthlyRent ?? undefined
   }
   return { ok: true, values, input, admin }
 }
