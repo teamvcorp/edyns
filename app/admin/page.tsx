@@ -10,6 +10,7 @@ import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { ButtonLink } from '@/components/elements/button'
+import { PROGRAMS, programOf } from '@/lib/programs'
 
 export const metadata: Metadata = { title: 'Admin' }
 
@@ -31,6 +32,9 @@ export default async function AdminPage() {
   const activeRent = tenants.filter((t) => t.billing?.status === 'active').length
   const rentAttention = tenants.filter(
     (t) => t.billing?.status === 'past_due' || t.billing?.status === 'paused',
+  ).length
+  const ownLandlordTenants = tenants.filter(
+    (t) => t.status === 'approved' && PROGRAMS[programOf(t)].outsideLandlord,
   ).length
 
   return (
@@ -104,6 +108,21 @@ export default async function AdminPage() {
             </Text>
           </div>
           <ButtonLink href="/admin/revenue">View revenue</ButtonLink>
+        </div>
+      </Card>
+
+      <Card className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-col">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Landlord payments</h3>
+            <Text className="text-sm/6">
+              <p>
+                {ownLandlordTenants} tenant{ownLandlordTenants === 1 ? '' : 's'} whose rent we pay to an outside
+                landlord.
+              </p>
+            </Text>
+          </div>
+          <ButtonLink href="/admin/landlord-payments">Review landlord payments</ButtonLink>
         </div>
       </Card>
 

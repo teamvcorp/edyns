@@ -1,12 +1,15 @@
 import Stripe from 'stripe'
-import { getStripe, invoiceSubscriptionId } from '@/lib/stripe'
+import { getStripe, invoiceSubscriptionId, invoiceRentSplit } from '@/lib/stripe'
 import {
   applyFeeResult,
   setBillingStatusBySubscription,
   syncPauseFromStripe,
   getTenantBySubscriptionId,
   type BillingStatus,
+  type Tenant,
 } from '@/lib/tenants'
+import { PROGRAMS, programOf } from '@/lib/programs'
+import { recordInvoiceDeposits } from '@/lib/program-ledger'
 import { getPropertyById } from '@/lib/properties'
 import { recordRentEquity } from '@/lib/equity'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
@@ -22,17 +25,55 @@ const DEFAULT_EQUITY_SHARE_PERCENT = 10
  * percentage of the base rent (per property) becomes partner equity. Best-effort
  * and idempotent (keyed on the invoice id) — never blocks the webhook response.
  */
-async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionId: string): Promise<void> {
-  // Credit any real rent invoice that is now paid — whether the money moved
-  // through Stripe, came from an alternative-payment credit on the customer
-  // balance (cash/check recorded by an admin), or a mix. Those credits stand in
-  // for rent paid another way, so the partner's share still accrues (policy
-  // decided 2026-11-01). Zero-total invoices — e.g. the $0 invoice Stripe issues
-  // when a "trial" (our next-draft-date scheduling) starts — are skipped.
-  if (!invoice.id || invoice.status !== 'paid' || !invoice.total || invoice.total <= 0) return
+/**
+ * A rent invoice that should create money records: actually paid, non-zero.
+ * Credit-covered invoices count (amount_paid 0 but total > 0) — a credit stands
+ * in for money paid another way (policy decided 2026-11-01). Zero-total invoices
+ * — e.g. the $0 invoice Stripe issues when a "trial" (our next-draft-date
+ * scheduling) starts — are skipped.
+ */
+function isPaidRentInvoice(invoice: Stripe.Invoice): invoice is Stripe.Invoice & { id: string } {
+  return Boolean(invoice.id) && invoice.status === 'paid' && !!invoice.total && invoice.total > 0
+}
 
-  const tenant = await getTenantBySubscriptionId(subscriptionId)
-  if (!tenant?.currentPropertyId) return
+function invoicePaidAt(invoice: Stripe.Invoice): Date {
+  return new Date((invoice.status_transitions?.paid_at ?? invoice.created) * 1000)
+}
+
+/**
+ * Own-landlord / car-savings tenants: split the paid invoice into the rent and
+ * car buckets of the program ledger (lib/program-ledger.ts). The split comes
+ * from the invoice's Stripe price (terms live when it was billed); the tenant's
+ * current record is only a fallback. Idempotent per invoice id. Throws on
+ * failure so the webhook returns 500 and Stripe retries — this is a money
+ * record, unlike best-effort partner equity.
+ */
+async function recordProgramDepositsForInvoice(invoice: Stripe.Invoice & { id: string }, tenant: Tenant): Promise<void> {
+  const program = programOf(tenant)
+  let split = await invoiceRentSplit(invoice)
+  if (!split && tenant.billing?.split) split = { ...tenant.billing.split }
+  if (!split) {
+    // No split anywhere (e.g. legacy/imported price): assign the whole base to the program's only bucket.
+    const base = tenant.billing?.baseAmountCents ?? invoice.total
+    logWarn('stripe/webhook/program-split', 'invoice had no split metadata; using program default', {
+      tenantId: tenant.id,
+      invoiceId: invoice.id,
+    })
+    split = PROGRAMS[program].rentRate > 0 ? { rentCents: base, carCents: 0 } : { rentCents: 0, carCents: base }
+  }
+  await recordInvoiceDeposits({
+    tenantId: tenant.id,
+    invoiceId: invoice.id,
+    rentCents: split.rentCents,
+    carCents: split.carCents,
+    paidAt: invoicePaidAt(invoice),
+  })
+}
+
+async function recordRentEquityForInvoice(invoice: Stripe.Invoice & { id: string }, tenant: Tenant): Promise<void> {
+  // Partner equity only exists for homes we manage (Effort Exchange).
+  if (!PROGRAMS[programOf(tenant)].managedHousing) return
+  if (!tenant.currentPropertyId) return
 
   const property = await getPropertyById(tenant.currentPropertyId)
   if (!property) return
@@ -48,7 +89,6 @@ async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionI
   const equityCents = Math.round((rentCents * sharePercent) / 100)
   if (equityCents <= 0) return
 
-  const paidAtEpoch = invoice.status_transitions?.paid_at ?? invoice.created
   await recordRentEquity({
     partnerId: property.partnerId,
     propertyId: property.id,
@@ -57,7 +97,7 @@ async function recordRentEquityForInvoice(invoice: Stripe.Invoice, subscriptionI
     rentCents,
     sharePercent,
     equityCents,
-    paidAt: new Date(paidAtEpoch * 1000),
+    paidAt: invoicePaidAt(invoice),
   })
 }
 
@@ -132,11 +172,23 @@ export async function POST(request: Request): Promise<Response> {
     const subId = invoiceSubscriptionId(invoice)
     if (subId) {
       await setBillingStatusBySubscription(subId, 'active')
-      try {
-        await recordRentEquityForInvoice(invoice, subId)
-      } catch (err) {
-        logError('stripe/webhook/rent-equity', err, { invoiceId: invoice.id })
-        /* equity crediting is best-effort — never fail the webhook over it */
+      const tenant = isPaidRentInvoice(invoice) ? await getTenantBySubscriptionId(subId) : null
+      if (tenant && isPaidRentInvoice(invoice)) {
+        if (PROGRAMS[programOf(tenant)].managedHousing) {
+          try {
+            await recordRentEquityForInvoice(invoice, tenant)
+          } catch (err) {
+            logError('stripe/webhook/rent-equity', err, { invoiceId: invoice.id })
+            /* equity crediting is best-effort — never fail the webhook over it */
+          }
+        } else {
+          try {
+            await recordProgramDepositsForInvoice(invoice, tenant)
+          } catch (err) {
+            logError('stripe/webhook/program-ledger', err, { invoiceId: invoice.id, tenantId: tenant.id })
+            return new Response('Ledger write failed', { status: 500 }) // Stripe retries; writes are idempotent
+          }
+        }
       }
     }
   } else if (event.type === 'invoice.payment_failed') {

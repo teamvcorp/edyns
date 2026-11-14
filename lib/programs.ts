@@ -130,6 +130,55 @@ export function splitForIncome(
   }
 }
 
+/** Per-draft cap per component — a typo guard (cents typed as dollars), not a policy limit. */
+export const MAX_DRAFT_COMPONENT_DOLLARS = 20_000
+
+export type ProgramAmounts = {
+  rentCents: number
+  carCents: number
+  /** rent + car — what gets grossed up with withProcessingFee. */
+  baseAmountCents: number
+  /** Stored on billing + Stripe price metadata; omitted for rent-only (Effort Exchange). */
+  split?: { rentCents: number; carCents: number }
+}
+
+/**
+ * Read the admin-entered per-draft amounts (`rentAmount`, `carAmount`, dollars)
+ * for a program. Server-side gate for every rent form (start / adjust / restart):
+ * a component the program doesn't have must be empty/zero, one it has must be > 0.
+ */
+export function parseProgramAmounts(
+  fd: FormData,
+  program: ProgramId,
+): { ok: true; amounts: ProgramAmounts } | { ok: false; error: string } {
+  const def = PROGRAMS[program]
+  const read = (k: string): number | null => {
+    const s = String(fd.get(k) ?? '').trim()
+    if (s === '') return 0
+    const n = Number(s)
+    return Number.isFinite(n) && n >= 0 && n <= MAX_DRAFT_COMPONENT_DOLLARS ? n : null
+  }
+  const rent = read('rentAmount')
+  const car = read('carAmount')
+  if (rent === null || car === null) return { ok: false, error: 'Enter amounts in dollars (up to $20,000 each).' }
+  if (def.rentRate > 0 && rent <= 0) return { ok: false, error: `Enter the rent amount (${pct(def.rentRate)}% of pay).` }
+  if (def.rentRate === 0 && rent > 0) return { ok: false, error: `${def.label} has no rent component.` }
+  if (def.carRate > 0 && car <= 0) return { ok: false, error: `Enter the car savings amount (${pct(def.carRate)}% of pay).` }
+  if (def.carRate === 0 && car > 0) return { ok: false, error: `${def.label} has no car savings component.` }
+
+  const rentCents = Math.round(rent * 100)
+  const carCents = Math.round(car * 100)
+  return {
+    ok: true,
+    amounts: {
+      rentCents,
+      carCents,
+      baseAmountCents: rentCents + carCents,
+      split: def.carRate > 0 ? { rentCents, carCents } : undefined,
+    },
+  }
+}
+
 /** Max monthly rent that counts as affordable for an income (dollars). */
 export function affordableRentFor(monthlyIncome: number): number {
   return Math.floor(monthlyIncome * AFFORDABLE_RENT_RATE * 100) / 100

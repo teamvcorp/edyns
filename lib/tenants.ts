@@ -39,9 +39,9 @@ export type BillingStatus = 'none' | 'active' | 'past_due' | 'canceled' | 'pause
 export type BillingFrequency = 'weekly' | 'biweekly' | 'monthly'
 
 export interface Billing {
-  /** Per-draft charge in cents (the 40% grossed up so the tenant covers Stripe's fee). */
+  /** Per-draft charge in cents (base grossed up so the tenant covers Stripe's fee). */
   amountCents: number
-  /** The base 40% amount (before processing fee) the admin entered, in cents. */
+  /** The base per-draft amount (rent + car, before processing fee) the admin entered, in cents. */
   baseAmountCents: number
   /** How often rent drafts. */
   frequency: BillingFrequency
@@ -53,7 +53,7 @@ export interface Billing {
   /**
    * True when this subscription was created manually in Stripe and imported into
    * the app (one-off tenants not in the normal flow), rather than created by the
-   * 40% rent setup. For these the `baseAmountCents` mirrors `amountCents`.
+   * program-rate setup. For these the `baseAmountCents` mirrors `amountCents`.
    */
   imported?: boolean
   /** Next scheduled draft, set when an admin changes the terms (else see firstDraftAt / Stripe). */
@@ -174,7 +174,7 @@ export interface TenantDoc {
   flaggedForReview?: boolean
   reviewReason?: string
   flaggedAt?: Date
-  /** Recurring rent collection (40% of income) via Stripe. */
+  /** Recurring collection (program rate of income, lib/programs.ts) via Stripe. */
   billing?: Billing
   /** Admin changes to rent terms, oldest first. */
   billingHistory?: BillingChange[]
@@ -517,7 +517,7 @@ export async function setVerifiedIncome(
 /**
  * Admin manually verifies income (reviewed paystub, employer call, …) and
  * records the confirmed figures — the same fields Plaid verification sets, so
- * rent setup, the 40% suggestion, and the 35-hour check all work unchanged.
+ * rent setup, the program-rate suggestion, and the 35-hour check all work unchanged.
  * Distinguishable from Plaid via verificationMethod: 'manual'.
  */
 export async function setVerifiedIncomeManually(
@@ -554,14 +554,20 @@ export async function clearBilling(tenantId: string): Promise<void> {
   await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { updatedAt: new Date() }, $unset: { billing: '' } })
 }
 
-/** Update rent billing status from a Stripe webhook. Never clobbers a manual 'paused' (job-loss) state. */
 /**
  * Save new rent terms after Stripe accepted the change, and append the audit
  * entry. Clears `imported`: once the app has re-priced it, the app manages it.
+ * `split` is replaced (or removed for rent-only programs).
  */
 export async function updateBillingTerms(
   tenantId: string,
-  terms: { baseAmountCents: number; amountCents: number; frequency: BillingFrequency; nextDraftAt: Date },
+  terms: {
+    baseAmountCents: number
+    amountCents: number
+    frequency: BillingFrequency
+    nextDraftAt: Date
+    split?: { rentCents: number; carCents: number }
+  },
   change: BillingChange,
 ): Promise<boolean> {
   if (!ObjectId.isValid(tenantId)) return false
@@ -574,9 +580,10 @@ export async function updateBillingTerms(
         'billing.amountCents': terms.amountCents,
         'billing.frequency': terms.frequency,
         'billing.nextDraftAt': terms.nextDraftAt,
+        ...(terms.split ? { 'billing.split': terms.split } : {}),
         updatedAt: new Date(),
       },
-      $unset: { 'billing.imported': '' },
+      $unset: { 'billing.imported': '', ...(terms.split ? {} : { 'billing.split': '' }) },
       $push: { billingHistory: change },
     },
   )
@@ -705,6 +712,7 @@ export async function recordRentCredit(tenantId: string, credit: RentCredit): Pr
   return res.matchedCount === 1
 }
 
+/** Update rent billing status from a Stripe webhook. Never clobbers a manual 'paused' (job-loss) state. */
 export async function setBillingStatusBySubscription(subscriptionId: string, status: BillingStatus): Promise<void> {
   const col = await tenantsCollection()
   await col.updateOne(

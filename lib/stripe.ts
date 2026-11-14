@@ -4,6 +4,7 @@ import Stripe from 'stripe'
 import type { BillingFrequency, BillingStatus } from './tenants'
 import { logError } from './log'
 import { withProcessingFee } from './fees'
+import { PROGRAMS, type ProgramId } from './programs'
 
 let client: Stripe | null = null
 
@@ -19,10 +20,9 @@ export function getStripe(): Stripe {
 /** Base application fee, in cents. */
 export const APPLICATION_FEE_CENTS = 2500
 
-/** Share of a tenant's monthly income collected as rent. */
-export const COLLECTION_RATE = 0.4
+// Collection rates are per program now — see lib/programs.ts (PROGRAMS, splitForIncome).
 
-/** Effort Exchange: minimum verified hours worked per week. */
+/** Minimum verified hours worked per week — applies to EVERY program. */
 export const REQUIRED_WEEKLY_HOURS = 35
 
 // Fee math lives in lib/fees.ts (client-safe) so admin form previews match the server.
@@ -46,6 +46,37 @@ export function invoiceSubscriptionId(invoice: Stripe.Invoice): string | undefin
   if (typeof i.subscription === 'string') return i.subscription
   if (i.subscription?.id) return i.subscription.id
   return i.parent?.subscription_details?.subscription
+}
+
+/**
+ * The rent/car split a paid rent invoice was billed under, read from the
+ * metadata of the PRICE on its line (see rentPriceMetadata). Null when the
+ * price carries no split (Effort Exchange / imported subscriptions → all rent)
+ * or Stripe can't be reached (caller logs; webhook retries).
+ *
+ * API note (2025-08-27.basil): invoice lines no longer embed `price`; they carry
+ * `pricing.price_details.price` (an id), so the price is retrieved here.
+ * Older payloads with `line.price` are still handled.
+ */
+export async function invoiceRentSplit(
+  invoice: Stripe.Invoice,
+): Promise<{ program?: string; rentCents: number; carCents: number } | null> {
+  type LineShape = {
+    pricing?: { price_details?: { price?: string | { id?: string } } } | null
+    price?: string | { id?: string; metadata?: Record<string, string> } | null
+  }
+  const line = invoice.lines?.data?.[0] as unknown as LineShape | undefined
+  if (!line) return null
+  const ref = line.pricing?.price_details?.price ?? line.price
+  const priceId = typeof ref === 'string' ? ref : ref?.id
+  if (!priceId) return null
+
+  const price = await getStripe().prices.retrieve(priceId) // throws → webhook returns 500 → Stripe retries
+  const md = price.metadata ?? {}
+  const rentCents = Number(md.rentCents)
+  const carCents = Number(md.carCents)
+  if (!Number.isInteger(rentCents) || !Number.isInteger(carCents) || rentCents < 0 || carCents < 0) return null
+  return { program: md.program, rentCents, carCents }
 }
 
 // ---- Importing an existing Stripe customer (admin add-tenant prefill) ----
@@ -229,6 +260,25 @@ export async function fetchSubscriptionForImport(subscriptionId: string): Promis
 // ---- Rent subscription changes & credits (admin) ---------------------------
 // Stripe behaviour relied on here is noted in docs/vendor/stripe-rent-billing.md.
 
+/**
+ * Metadata stamped on every rent PRICE. The price travels with each invoice
+ * line, so the webhook can split a paid invoice into rent vs car savings using
+ * the terms that were live WHEN IT WAS BILLED — a later rent change creates a
+ * new price and can't rewrite history. Values are base cents (before the
+ * processing fee). Stripe metadata values must be strings.
+ */
+function rentPriceMetadata(input: {
+  tenantId: string
+  program: ProgramId
+  split?: { rentCents: number; carCents: number }
+}): Record<string, string> {
+  return {
+    tenantId: input.tenantId,
+    program: input.program,
+    ...(input.split ? { rentCents: String(input.split.rentCents), carCents: String(input.split.carCents) } : {}),
+  }
+}
+
 /** Stripe recurring interval for each rent frequency. Shared by rent setup and rent changes. */
 export const RENT_INTERVALS: Record<BillingFrequency, { interval: 'week' | 'month'; interval_count: number }> = {
   weekly: { interval: 'week', interval_count: 1 },
@@ -290,6 +340,8 @@ export async function adjustRentSubscription(input: {
   nextDraftAt: Date
   tenantId: string
   idempotencyKey: string
+  program: ProgramId
+  split?: { rentCents: number; carCents: number }
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const stripe = getStripe()
   let sub: Stripe.Subscription
@@ -316,7 +368,7 @@ export async function adjustRentSubscription(input: {
         unit_amount: input.amountCents,
         recurring: RENT_INTERVALS[input.frequency],
         product: productId,
-        metadata: { tenantId: input.tenantId },
+        metadata: rentPriceMetadata(input),
       },
       { idempotencyKey: `${input.idempotencyKey}:price` },
     )
@@ -326,7 +378,7 @@ export async function adjustRentSubscription(input: {
         items: [{ id: item.id, price: price.id, quantity: 1 }],
         proration_behavior: 'none',
         trial_end: Math.floor(input.nextDraftAt.getTime() / 1000),
-        metadata: { tenantId: input.tenantId },
+        metadata: { tenantId: input.tenantId, program: input.program },
       },
       { idempotencyKey: `${input.idempotencyKey}:sub` },
     )
@@ -389,11 +441,13 @@ export async function createRentSubscription(input: {
   firstDraftAt: Date
   tenantId: string
   idempotencyKey?: string
+  program: ProgramId
+  split?: { rentCents: number; carCents: number }
 }): Promise<{ subscriptionId: string; active: boolean }> {
   const stripe = getStripe()
   const key = (suffix: string) => (input.idempotencyKey ? { idempotencyKey: `${input.idempotencyKey}:${suffix}` } : undefined)
   const product = await stripe.products.create(
-    { name: 'edynsgate rent (Effort Exchange)', metadata: { tenantId: input.tenantId } },
+    { name: `edynsgate ${PROGRAMS[input.program].label}`, metadata: { tenantId: input.tenantId, program: input.program } },
     key('product'),
   )
   const price = await stripe.prices.create(
@@ -402,7 +456,7 @@ export async function createRentSubscription(input: {
       unit_amount: input.amountCents,
       recurring: RENT_INTERVALS[input.frequency],
       product: product.id,
-      metadata: { tenantId: input.tenantId },
+      metadata: rentPriceMetadata(input),
     },
     key('price'),
   )
@@ -412,7 +466,7 @@ export async function createRentSubscription(input: {
       items: [{ price: price.id }],
       default_payment_method: input.paymentMethodId,
       trial_end: Math.floor(input.firstDraftAt.getTime() / 1000), // first draft on this date, then recurs
-      metadata: { tenantId: input.tenantId },
+      metadata: { tenantId: input.tenantId, program: input.program },
     },
     key('sub'),
   )

@@ -3,6 +3,7 @@ import 'server-only'
 import { getStripe, invoiceSubscriptionId } from './stripe'
 import { listTenants, type BillingFrequency, type BillingStatus } from './tenants'
 import { logError } from './log'
+import { PROGRAMS, programOf } from './programs'
 
 /** Months-worth of drafts per billing cycle, for normalizing to monthly income. */
 const MONTHLY_FACTOR: Record<BillingFrequency, number> = {
@@ -40,6 +41,12 @@ export type RevenueOverview = {
   projectedMonthlyBaseCents: number
   /** Same projection on the amounts actually charged (incl. processing the tenant covers). */
   projectedMonthlyChargedCents: number
+  /**
+   * Monthly base collected for own-landlord / car-savings tenants. NOT revenue:
+   * it's held for them (forwarded to landlords or saved toward a car —
+   * lib/program-ledger.ts), so it's excluded from projectedMonthlyBaseCents.
+   */
+  projectedMonthlyHeldCents: number
   activeCount: number
   pastDueCount: number
   pausedCount: number
@@ -87,10 +94,14 @@ export async function getRevenueOverview(): Promise<RevenueOverview> {
 
   let projectedMonthlyBaseCents = 0
   let projectedMonthlyChargedCents = 0
+  let projectedMonthlyHeldCents = 0
   for (const t of billed) {
     if (t.billing!.status !== 'active') continue
     const factor = MONTHLY_FACTOR[t.billing!.frequency]
-    projectedMonthlyBaseCents += Math.round(t.billing!.baseAmountCents * factor)
+    const monthlyBase = Math.round(t.billing!.baseAmountCents * factor)
+    // Only Effort Exchange rent is platform income; program funds are held for the tenant.
+    if (PROGRAMS[programOf(t)].managedHousing) projectedMonthlyBaseCents += monthlyBase
+    else projectedMonthlyHeldCents += monthlyBase
     projectedMonthlyChargedCents += Math.round(t.billing!.amountCents * factor)
   }
 
@@ -169,6 +180,7 @@ export async function getRevenueOverview(): Promise<RevenueOverview> {
   return {
     projectedMonthlyBaseCents,
     projectedMonthlyChargedCents,
+    projectedMonthlyHeldCents,
     activeCount,
     pastDueCount,
     pausedCount,

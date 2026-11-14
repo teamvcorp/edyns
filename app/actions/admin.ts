@@ -66,6 +66,7 @@ import {
 import { sendApprovalEmail, sendWelcomeBackEmail, sendVerificationResetEmail } from '@/lib/email'
 import { MIN_TIER, MAX_TIER } from '@/lib/tiers'
 import { logError } from '@/lib/log'
+import { programOf, parseProgramAmounts } from '@/lib/programs'
 
 export type AdminActionState = { error?: string } | undefined
 
@@ -510,24 +511,22 @@ export async function resetTenantVerificationAction(formData: FormData): Promise
 
 
 /**
- * Set up recurring rent for an approved tenant: the admin enters the 40% amount,
- * the draft frequency, and the first draft date (after reviewing Plaid income or
- * the uploaded paystub). Creates a Stripe subscription anchored to the first draft
- * date; the base amount is grossed up so the tenant covers Stripe's processing fee.
+ * Set up recurring collection for an approved tenant: the admin enters the
+ * per-draft amounts for the tenant's program (rent and/or car savings — see
+ * lib/programs.ts), the draft frequency, and the first draft date (after
+ * reviewing verified income). Creates a Stripe subscription anchored to the
+ * first draft date; the base amount is grossed up so the tenant covers Stripe's
+ * processing fee. The rent/car split is stamped on the Stripe price.
  */
 export async function startTenantBillingAction(_prev: AdminActionState, formData: FormData): Promise<AdminActionState> {
   await requireRole('admin', '/admin/login')
 
   const id = String(formData.get('id') ?? '')
-  const baseAmount = Number(String(formData.get('amount') ?? '').trim())
   const frequency = String(formData.get('frequency') ?? '') as BillingFrequency
   const firstDraft = String(formData.get('firstDraft') ?? '').trim()
 
   if (!id) return { error: 'Missing tenant id.' }
   if (!RENT_INTERVALS[frequency]) return { error: 'Choose a draft frequency.' }
-  if (!Number.isFinite(baseAmount) || baseAmount <= 0) {
-    return { error: 'Enter the recurring amount (40% of pay).' }
-  }
   const draftDate = new Date(`${firstDraft}T12:00:00`)
   if (Number.isNaN(draftDate.getTime())) return { error: 'Choose the first draft date.' }
   const firstDraftEpoch = Math.floor(draftDate.getTime() / 1000)
@@ -542,8 +541,13 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
     return { error: 'Tenant has no saved payment method (application fee must be paid first).' }
   }
   if (tenant.billing?.status === 'active') return { error: 'Rent collection is already active.' }
+  // The UI only offers this after verification; enforce it here too (actions are public endpoints).
+  if (!tenant.employment.verified) return { error: 'Verify the tenant’s income before starting collection.' }
 
-  const baseAmountCents = Math.round(baseAmount * 100)
+  const program = programOf(tenant)
+  const parsedAmounts = parseProgramAmounts(formData, program)
+  if (!parsedAmounts.ok) return { error: parsedAmounts.error }
+  const { baseAmountCents, split } = parsedAmounts.amounts
   const amountCents = withProcessingFee(baseAmountCents)
 
   let subscriptionId: string
@@ -557,6 +561,8 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
       frequency,
       firstDraftAt: draftDate,
       tenantId: id,
+      program,
+      split,
     })
     subscriptionId = created.subscriptionId
     subActive = created.active
@@ -573,6 +579,7 @@ export async function startTenantBillingAction(_prev: AdminActionState, formData
     status: subActive ? 'active' : 'past_due',
     firstDraftAt: draftDate,
     startedAt: new Date(),
+    split,
   })
   // First monthly income/job-loss re-check lands on the first draft (≈ payday).
   await setNextIncomeCheck(id, draftDate)
@@ -689,9 +696,9 @@ export async function importStripeSubscriptionAction(formData: FormData): Promis
 }
 
 /**
- * Replace an imported subscription with the normal 40% model: cancel the imported
+ * Replace an imported subscription with the program-rate model: cancel the imported
  * subscription in Stripe and clear the billing record, returning the tenant to the
- * standard rent-setup state so the admin can start the 40% subscription.
+ * standard rent-setup state so the admin can start the program-rate subscription.
  */
 export async function replaceImportedWithBillingAction(formData: FormData): Promise<void> {
   await requireRole('admin', '/admin/login')

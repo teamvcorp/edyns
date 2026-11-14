@@ -56,3 +56,15 @@ Re-verify if the SDK major version changes.
 ## Fees
 - Tenant covers processing: charge = `withProcessingFee(base)` = ceil((base + 30¢) / (1 − 2.9%)) (`lib/fees.ts`).
   Example: base $720.00 → charged $741.82 → Stripe ≈ $21.81 → platform keeps $720.
+
+## Tenant programs: rent vs car split (added 2026-11-14)
+- One subscription, ONE item per tenant (keeps adjust/pause/restart/credits unchanged). The per-draft base is
+  `rent + car`; the split lives in Mongo (`billing.split`) **and** on the Stripe **price** metadata:
+  `{ tenantId, program, rentCents, carCents }` (strings; base cents before the processing fee). Set by
+  `rentPriceMetadata()` in `createRentSubscription` / `adjustRentSubscription`.
+- Why the price: each rent change creates a NEW price, and an invoice line references the price it was billed
+  under — so splitting a paid invoice by its price can't be distorted by a later change or a late/retried webhook.
+- **API 2025-08-27.basil:** invoice lines no longer embed `price`. Read `line.pricing.price_details.price` (a price
+  id) and `stripe.prices.retrieve(id)` to get metadata → `invoiceRentSplit()` in `lib/stripe.ts`. Older payloads
+  with `line.price` are still accepted.
+- Subscription + product metadata also carry `program` (product name `edynsgate <program label>`).

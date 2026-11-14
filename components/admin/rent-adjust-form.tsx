@@ -3,9 +3,10 @@
 import { useActionState, useState } from 'react'
 import { Button } from '@/components/elements/button'
 import { inputClass } from '@/components/elements/input'
-import { withProcessingFee } from '@/lib/fees'
-import { formatCents } from '@/lib/format'
 import { adjustRentAction, restartRentAction, type RentFormState } from '@/app/actions/rent'
+import { ProgramAmountFields } from '@/components/admin/program-amount-fields'
+import type { ProgramId } from '@/lib/programs'
+import type { BillingFrequency } from '@/lib/tenants'
 
 const labelClass = 'flex flex-col gap-1.5 text-sm font-medium text-olive-950 dark:text-white'
 
@@ -22,45 +23,49 @@ export function RentAdjustForm({
   current,
   minDate,
   mode = 'adjust',
+  program,
+  monthlyIncome,
 }: {
   tenantId: string
   nonce: string
-  current: { baseDollars: number; frequency: string; nextDraft: string }
+  /** Current per-draft base amounts (dollars) split into rent and car savings. */
+  current: { rentDollars: number; carDollars: number; frequency: BillingFrequency; nextDraft: string }
   /** Earliest selectable next draft (yyyy-mm-dd), computed on the server. The action re-checks it. */
   minDate: string
   mode?: 'adjust' | 'restart'
+  program: ProgramId
+  /** Verified monthly income (dollars) for the "suggest" button. */
+  monthlyIncome?: number
 }) {
   const restart = mode === 'restart'
   const [state, action, pending] = useActionState<RentFormState, FormData>(
     restart ? restartRentAction : adjustRentAction,
     undefined,
   )
-  const [amount, setAmount] = useState(current.baseDollars.toFixed(2))
-  const base = Math.round(Number(amount) * 100)
-  const preview = Number.isFinite(base) && base > 0 ? formatCents(withProcessingFee(base)) : '—'
+  const [frequency, setFrequency] = useState<BillingFrequency>(current.frequency)
 
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="tenantId" value={tenantId} />
       <input type="hidden" name="nonce" value={nonce} />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <label className={labelClass}>
-          Base rent (USD)
-          <input
-            name="amount"
-            type="number"
-            min="0.01"
-            step="0.01"
-            required
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            className={inputClass}
-          />
-        </label>
+      <ProgramAmountFields
+        program={program}
+        frequency={frequency}
+        monthlyIncome={monthlyIncome}
+        initial={{ rent: current.rentDollars, car: current.carDollars }}
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2">
         <label className={labelClass}>
           Frequency
-          <select name="frequency" required defaultValue={current.frequency} className={inputClass}>
+          <select
+            name="frequency"
+            required
+            value={frequency}
+            onChange={(e) => setFrequency(e.target.value as BillingFrequency)}
+            className={inputClass}
+          >
             <option value="weekly">Weekly</option>
             <option value="biweekly">Every 2 weeks</option>
             <option value="monthly">Monthly</option>
@@ -73,8 +78,7 @@ export function RentAdjustForm({
       </div>
 
       <p className="text-xs text-olive-600 dark:text-olive-500">
-        Tenant will be charged <strong>{preview}</strong> per draft (base + Stripe processing, which they cover). Nothing is
-        charged before the {restart ? 'first' : 'next'} draft date; {restart ? 'drafts' : 'the new amount and frequency'}{' '}
+        Nothing is charged before the {restart ? 'first' : 'next'} draft date; {restart ? 'drafts' : 'the new amount and frequency'}{' '}
         start then and repeat from that date.
         {restart && ' A new Stripe subscription is created on the tenant’s saved payment method.'}
       </p>

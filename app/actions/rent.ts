@@ -33,6 +33,7 @@ import {
   resumeRentSubscription,
 } from '@/lib/stripe'
 import { sendRentChangeEmail, sendRentCreditEmail, sendRentPauseEmail } from '@/lib/email'
+import { programOf, parseProgramAmounts } from '@/lib/programs'
 
 /**
  * Admin rent management for tenants who already have rent collection set up:
@@ -94,16 +95,12 @@ export async function adjustRentAction(_prev: RentFormState, formData: FormData)
   await requireRole('admin', '/admin/login')
 
   const tenantId = String(formData.get('tenantId') ?? '')
-  const baseDollars = Number(String(formData.get('amount') ?? '').trim())
   const frequency = String(formData.get('frequency') ?? '') as BillingFrequency
   const nextDraftAt = readDate(formData.get('nextDraft'))
   const note = String(formData.get('note') ?? '').trim().slice(0, MAX_NOTE)
   const nonce = readNonce(formData)
 
   if (!nonce) return { error: 'This form expired — reload the page and try again.' }
-  if (!Number.isFinite(baseDollars) || baseDollars <= 0 || baseDollars > MAX_RENT_DOLLARS) {
-    return { error: 'Enter the base rent amount in dollars.' }
-  }
   if (!RENT_INTERVALS[frequency]) return { error: 'Choose a frequency.' }
   if (!nextDraftAt) return { error: 'Choose the next draft date.' }
   if (nextDraftAt.getTime() <= Date.now()) return { error: 'The next draft date must be in the future.' }
@@ -113,7 +110,11 @@ export async function adjustRentAction(_prev: RentFormState, formData: FormData)
   if (!tenant?.billing) return { error: 'This tenant has no rent collection to change.' }
   if (tenant.billing.status === 'canceled') return { error: 'Rent collection is canceled — set it up again instead.' }
 
-  const baseAmountCents = Math.round(baseDollars * 100)
+  // Amounts are validated against the TENANT'S program (server-side), never a posted one.
+  const program = programOf(tenant)
+  const parsedAmounts = parseProgramAmounts(formData, program)
+  if (!parsedAmounts.ok) return { error: parsedAmounts.error }
+  const { baseAmountCents, split } = parsedAmounts.amounts
   const amountCents = withProcessingFee(baseAmountCents) // tenant covers Stripe's fee (app rule)
 
   const result = await adjustRentSubscription({
@@ -123,6 +124,8 @@ export async function adjustRentAction(_prev: RentFormState, formData: FormData)
     nextDraftAt,
     tenantId,
     idempotencyKey: `rent-adjust:${nonce}`,
+    program,
+    split,
   })
   if (!result.ok) return { error: result.error }
 
@@ -130,7 +133,7 @@ export async function adjustRentAction(_prev: RentFormState, formData: FormData)
   // right (it's what charges); log loudly so the record can be fixed.
   const saved = await updateBillingTerms(
     tenantId,
-    { baseAmountCents, amountCents, frequency, nextDraftAt },
+    { baseAmountCents, amountCents, frequency, nextDraftAt, split },
     {
       at: new Date(),
       from: {
@@ -257,15 +260,11 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
   await requireRole('admin', '/admin/login')
 
   const tenantId = String(formData.get('tenantId') ?? '')
-  const baseDollars = Number(String(formData.get('amount') ?? '').trim())
   const frequency = String(formData.get('frequency') ?? '') as BillingFrequency
   const firstDraftAt = readDate(formData.get('nextDraft'))
   const nonce = readNonce(formData)
 
   if (!nonce) return { error: 'This form expired — reload the page and try again.' }
-  if (!Number.isFinite(baseDollars) || baseDollars <= 0 || baseDollars > MAX_RENT_DOLLARS) {
-    return { error: 'Enter the base rent amount in dollars.' }
-  }
   if (!RENT_INTERVALS[frequency]) return { error: 'Choose a frequency.' }
   if (!firstDraftAt) return { error: 'Choose the first draft date.' }
   if (firstDraftAt.getTime() <= Date.now()) return { error: 'The first draft date must be in the future.' }
@@ -276,6 +275,11 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
     return { error: 'Only canceled rent collection can be restarted.' }
   }
   if (!tenant.stripeCustomerId) return { error: 'This tenant has no Stripe customer on file.' }
+
+  const program = programOf(tenant)
+  const parsedAmounts = parseProgramAmounts(formData, program)
+  if (!parsedAmounts.ok) return { error: parsedAmounts.error }
+  const { baseAmountCents, split } = parsedAmounts.amounts
 
   // 1. Never double-bill: the old subscription must be over in Stripe.
   const old = await subscriptionEnded(tenant.billing.stripeSubscriptionId)
@@ -302,7 +306,6 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
   }
 
   // 3. New subscription.
-  const baseAmountCents = Math.round(baseDollars * 100)
   const amountCents = withProcessingFee(baseAmountCents)
   let created: { subscriptionId: string; active: boolean }
   try {
@@ -314,6 +317,8 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
       firstDraftAt,
       tenantId,
       idempotencyKey: `rent-restart:${nonce}`,
+      program,
+      split,
     })
   } catch (err) {
     logError('rent/restart-create', err, { tenantId })
@@ -330,6 +335,7 @@ export async function restartRentAction(_prev: RentFormState, formData: FormData
     firstDraftAt,
     nextDraftAt: firstDraftAt,
     startedAt: new Date(),
+    split,
   })
   if (!saved) {
     // Someone else restarted at the same moment, or the record changed. The new

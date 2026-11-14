@@ -4,7 +4,9 @@ import { getTenantByUserId } from '@/lib/tenants'
 import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment } from '@/app/actions/tenants'
-import { COLLECTION_RATE, REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
+import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
+import { PROGRAMS, programOf, rateSummary } from '@/lib/programs'
+import { balancesFor } from '@/lib/program-ledger'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
 import { PlaidVerifyButton } from '@/components/tenants/plaid-verify-button'
@@ -22,7 +24,7 @@ export const metadata: Metadata = { title: 'Tenant portal' }
 
 const statusCopy = {
   pending: { label: 'Pending review', body: 'Your application is in the queue. We’ll email you once it’s reviewed.' },
-  approved: { label: 'Approved', body: 'You’re approved! You can browse available properties below.' },
+  approved: { label: 'Approved', body: 'You’re approved! Verify your income below so we can set up your collection.' },
   rejected: { label: 'Not approved', body: 'Your application was not approved.' },
 } as const
 
@@ -58,6 +60,10 @@ export default async function TenantPortalPage({
   }
 
   const status = statusCopy[tenant.status]
+  const program = programOf(tenant)
+  const def = PROGRAMS[program]
+  // Money edynsgate holds for this tenant (own_landlord / car_only only).
+  const funds = !def.managedHousing && tenant.status === 'approved' ? await balancesFor(tenant.id) : null
   const householdSize = 1 + tenant.adults.length + tenant.children.length
 
   const verifiedIncome = tenant.employment.verifiedMonthlyIncome
@@ -99,6 +105,59 @@ export default async function TenantPortalPage({
         </Text>
         {tenant.status === 'rejected' && tenant.rejectionReason && (
           <p className="text-sm text-red-600 dark:text-red-400">Reason: {tenant.rejectionReason}</p>
+        )}
+      </Card>
+
+      {/* Program + funds we hold (lib/programs.ts, lib/program-ledger.ts) */}
+      <Card className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your program</h3>
+          <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">{def.label}</span>
+        </div>
+        <Text className="text-sm/6">
+          <p>
+            {def.summary} We collect {rateSummary(program)} of your pay. Every program asks for {REQUIRED_WEEKLY_HOURS}{' '}
+            hours of work a week.
+          </p>
+        </Text>
+        {tenant.landlord && (
+          <Text className="text-sm/6">
+            <p>
+              Your landlord: <strong>{tenant.landlord.name}</strong> · rent {formatCents(tenant.landlord.monthlyRentCents)}
+              /month. We pay your landlord from the rent we collect. If it doesn’t cover the full rent in a month, we’ll
+              email you the difference and offer to collect it.
+            </p>
+          </Text>
+        )}
+        {funds && (
+          <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+            {def.carRate > 0 && (
+              <div>
+                <dt className="text-sm text-olive-600 dark:text-olive-500">Car savings</dt>
+                <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCents(funds.carSavingsCents)}</dd>
+              </div>
+            )}
+            {def.outsideLandlord && (
+              <>
+                <div>
+                  <dt className="text-sm text-olive-600 dark:text-olive-500">Rent on hand for your landlord</dt>
+                  <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCents(funds.rentHeldCents)}</dd>
+                </div>
+                <div>
+                  <dt className="text-sm text-olive-600 dark:text-olive-500">Paid to your landlord</dt>
+                  <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCents(funds.landlordPaidCents)}</dd>
+                </div>
+              </>
+            )}
+          </dl>
+        )}
+        {def.carRate > 0 && (
+          <Text className="text-xs/5">
+            <p>
+              Car savings are held by edynsgate. When your savings cover a car we have available, our team will offer it
+              to you for approval.
+            </p>
+          </Text>
         )}
       </Card>
 
@@ -267,7 +326,9 @@ export default async function TenantPortalPage({
       {/* Rent collection (set up by our team after income is verified) */}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent collection</h3>
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
+            {def.rentRate > 0 ? 'Rent collection' : 'Savings collection'}
+          </h3>
           {billing && (
             <span className="text-sm font-semibold text-olive-700 capitalize dark:text-olive-300">{billing.status}</span>
           )}
@@ -278,9 +339,15 @@ export default async function TenantPortalPage({
               Drafting <strong>{formatCents(billing.amountCents)} {frequencyLabel[billing.frequency]}</strong> from
               your payment method. Next draft:{' '}
               <strong>{new Date(billing.nextDraftAt ?? billing.firstDraftAt).toLocaleDateString()}</strong>. This is{' '}
-              {Math.round(COLLECTION_RATE * 100)}% of your income plus Stripe processing, which you cover. Any credit on
-              your account (for example, a cash payment) is applied to your next draft automatically.
+              {rateSummary(program)} of your income plus Stripe processing, which you cover. Any credit on your account
+              (for example, a cash payment) is applied to your next draft automatically.
             </p>
+            {billing.split && (
+              <p className="mt-2">
+                Each draft: {formatCents(billing.split.rentCents)} toward rent
+                {billing.split.carCents > 0 ? ` and ${formatCents(billing.split.carCents)} into car savings` : ''}.
+              </p>
+            )}
             {(tenant.rentCredits?.length ?? 0) > 0 && (
               <>
                 <p className="mt-2 font-medium">Payments credited to your rent</p>
@@ -297,13 +364,13 @@ export default async function TenantPortalPage({
         ) : tenant.status === 'approved' ? (
           <Text className="text-sm/6">
             <p>
-              Once your income is verified, our team sets up your rent collection — the amount ({Math.round(COLLECTION_RATE * 100)}% of
+              Once your income is verified, our team sets up your collection — the amount ({rateSummary(program)} of
               your pay), how often it drafts, and the first draft date.
             </p>
           </Text>
         ) : (
           <Text className="text-sm/6">
-            <p>Rent collection begins after your application is approved and your income is verified.</p>
+            <p>Collection begins after your application is approved and your income is verified.</p>
           </Text>
         )}
       </Card>
@@ -369,7 +436,7 @@ export default async function TenantPortalPage({
         )}
       </Card>
 
-      <Link href="/programs/tenants">How the Effort Exchange works →</Link>
+      <Link href="/programs/tenants">How our programs work →</Link>
     </PortalShell>
   )
 }

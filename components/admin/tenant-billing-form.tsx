@@ -1,47 +1,50 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import { Button } from '@/components/elements/button'
 import { startTenantBillingAction, type AdminActionState } from '@/app/actions/admin'
+import { ProgramAmountFields } from '@/components/admin/program-amount-fields'
+import { PROGRAMS, rateSummary, type ProgramId } from '@/lib/programs'
+import type { BillingFrequency } from '@/lib/tenants'
 
 import { inputClass } from '@/components/elements/input'
 const labelClass = 'text-sm font-medium text-olive-950 dark:text-white'
 
+/**
+ * Start recurring collection for an approved, income-verified tenant. Amounts
+ * follow the tenant's program (lib/programs.ts) and are pre-filled from
+ * verified income converted to the chosen frequency.
+ */
 export function TenantBillingForm({
   tenantId,
-  suggestedAmount,
+  program,
+  monthlyIncome,
 }: {
   tenantId: string
-  suggestedAmount?: number
+  program: ProgramId
+  /** Verified monthly income (dollars), used for the suggested amounts. */
+  monthlyIncome?: number
 }) {
   const [state, action, pending] = useActionState<AdminActionState, FormData>(startTenantBillingAction, undefined)
+  const [frequency, setFrequency] = useState<BillingFrequency | ''>('')
 
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="id" value={tenantId} />
 
-      <label className="flex flex-col gap-1">
-        <span className={labelClass}>Recurring amount (40% of pay, in dollars)</span>
-        <input
-          name="amount"
-          type="number"
-          min="1"
-          step="0.01"
-          required
-          placeholder="e.g. 720.00"
-          defaultValue={suggestedAmount ? suggestedAmount.toFixed(2) : undefined}
-          className={inputClass}
-        />
-        {suggestedAmount ? (
-          <span className="text-xs text-olive-600 dark:text-olive-500">
-            Pre-filled with 40% of verified income. Adjust if needed.
-          </span>
-        ) : null}
-      </label>
+      <p className="text-sm text-olive-700 dark:text-olive-400">
+        {PROGRAMS[program].label}: collects {rateSummary(program)} of pay.
+      </p>
 
       <label className="flex flex-col gap-1">
         <span className={labelClass}>Draft frequency</span>
-        <select name="frequency" required defaultValue="" className={inputClass}>
+        <select
+          name="frequency"
+          required
+          value={frequency}
+          onChange={(e) => setFrequency(e.target.value as BillingFrequency | '')}
+          className={inputClass}
+        >
           <option value="" disabled>
             Select frequency…
           </option>
@@ -51,14 +54,16 @@ export function TenantBillingForm({
         </select>
       </label>
 
+      <ProgramAmountFields program={program} frequency={frequency} monthlyIncome={monthlyIncome} autoSuggest />
+
       <label className="flex flex-col gap-1">
         <span className={labelClass}>First draft date</span>
         <input name="firstDraft" type="date" required className={inputClass} />
       </label>
 
       <p className="text-xs text-olive-600 dark:text-olive-500">
-        The tenant is charged this amount plus Stripe’s processing fee (which they cover), drafting on the schedule above
-        starting the first draft date.
+        Choosing a frequency fills in the amounts from verified income for that schedule. Adjust them if needed. Drafts
+        start on the first draft date and repeat on the schedule above.
       </p>
 
       {state?.error && (
@@ -68,7 +73,7 @@ export function TenantBillingForm({
       )}
 
       <Button type="submit" disabled={pending} className="w-fit disabled:opacity-60">
-        {pending ? 'Starting…' : 'Start rent collection'}
+        {pending ? 'Starting…' : 'Start collection'}
       </Button>
     </form>
   )

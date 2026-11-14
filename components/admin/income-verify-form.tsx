@@ -29,7 +29,7 @@ export function IncomeVerifyForm({
       <p className="text-sm font-medium text-olive-700 dark:text-olive-400">Manually verify income</p>
       <p className="text-xs text-olive-600 dark:text-olive-500">
         If you verified the tenant’s income yourself (reviewed the paystub above, called the employer), record the
-        confirmed figures here. They feed the 40% rent suggestion and the {requiredWeeklyHours}-hour check, same as a
+        confirmed figures here. They feed the program-rate suggestion and the {requiredWeeklyHours}-hour check, same as a
         Plaid verification.
       </p>
       <div className="flex flex-wrap gap-4">

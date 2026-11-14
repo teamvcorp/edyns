@@ -17,6 +17,8 @@ import { RentAdjustForm } from '@/components/admin/rent-adjust-form'
 import { RentCreditForm } from '@/components/admin/rent-credit-form'
 import { StripeLinkForm } from '@/components/admin/stripe-link-form'
 import { RentPauseForm } from '@/components/admin/rent-pause-form'
+import { LandlordPaymentForm, LedgerAdjustmentForm } from '@/components/admin/program-funds-forms'
+import { balancesFor, listLedger } from '@/lib/program-ledger'
 import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
@@ -31,7 +33,6 @@ import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
 import { PROGRAMS, programOf, rateSummary, pct, rentExceedsAffordable } from '@/lib/programs'
 import {
-  COLLECTION_RATE,
   REQUIRED_WEEKLY_HOURS,
   getRentSubscriptionState,
   getCustomerCreditCents,
@@ -48,6 +49,13 @@ const creditMethodLabel = {
   money_order: 'Money order',
   bank_transfer: 'Bank transfer',
   other: 'Other',
+} as const
+const ledgerKindLabel = {
+  deposit: 'Draft',
+  shortfall_payment: 'Shortfall payment',
+  landlord_payment: 'Paid to landlord',
+  car_release: 'Released for car',
+  adjustment: 'Adjustment',
 } as const
 const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
 
@@ -121,6 +129,13 @@ export default async function AdminTenantReviewPage({
   if (!t) notFound()
   const referredFrom = t.interestedPropertyId ? await getPropertyById(t.interestedPropertyId) : null
   const program = programOf(t)
+  // Current per-draft base split into rent vs car (rent-only billing = all rent).
+  const currentSplitDollars = t.billing
+    ? {
+        rentDollars: (t.billing.split?.rentCents ?? t.billing.baseAmountCents) / 100,
+        carDollars: (t.billing.split?.carCents ?? 0) / 100,
+      }
+    : { rentDollars: 0, carDollars: 0 }
   // Affordability check prefers verified income, falling back to what they reported.
   const incomeForCheck = t.employment.verifiedMonthlyIncome ?? t.employment.monthlyIncome
   const incomeLabel = t.employment.verifiedMonthlyIncome != null ? 'verified' : 'reported'
@@ -135,6 +150,11 @@ export default async function AdminTenantReviewPage({
       ])
     : [null, null]
   const nextDraftAt = liveRent?.nextDraftAt ?? t.billing?.nextDraftAt ?? t.billing?.firstDraftAt
+  // Program funds (own_landlord / car_only): balances + recent ledger entries.
+  const holdsFunds = !PROGRAMS[program].managedHousing
+  const [funds, ledger] = holdsFunds
+    ? await Promise.all([balancesFor(t.id), listLedger(t.id, 25)])
+    : [null, []]
   // e.g. "visa •••• 4242" — never the full number.
   const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
@@ -554,7 +574,13 @@ export default async function AdminTenantReviewPage({
               <>
                 <dl className="grid gap-4 sm:grid-cols-3">
                   <Row label="Amount" value={`${formatCents(t.billing.amountCents)} ${frequencyLabel[t.billing.frequency]}`} />
-                  <Row label="Base (40%)" value={formatCents(t.billing.baseAmountCents)} />
+                  <Row label="Base (before fee)" value={formatCents(t.billing.baseAmountCents)} />
+                  {t.billing.split && (
+                    <Row
+                      label="Split"
+                      value={`${formatCents(t.billing.split.rentCents)} rent + ${formatCents(t.billing.split.carCents)} car savings`}
+                    />
+                  )}
                   <Row label="Status" value={t.billing.status} />
                   <Row label="First draft" value={new Date(t.billing.firstDraftAt).toLocaleDateString()} />
                   <Row label="Next draft" value={nextDraftAt ? new Date(nextDraftAt).toLocaleDateString() : '—'} />
@@ -573,13 +599,13 @@ export default async function AdminTenantReviewPage({
                     </span>
                     <p className="text-sm text-olive-600 dark:text-olive-500">
                       Amount and schedule come from the existing Stripe subscription. You can change them below (the app then
-                      manages it), or replace it with the 40% model — which cancels this subscription and returns the
+                      manages it), or replace it with the program-rate model — which cancels this subscription and returns the
                       tenant to standard rent setup.
                     </p>
                     <form action={replaceImportedWithBillingAction}>
                       <input type="hidden" name="id" value={t.id} />
                       <SoftButton type="submit" className="text-red-600 dark:text-red-400">
-                        Replace with 40% model
+                        Replace with program-rate model
                       </SoftButton>
                     </form>
                   </div>
@@ -608,7 +634,7 @@ export default async function AdminTenantReviewPage({
                       This tenant’s subscription is canceled. Restarting creates a new subscription on their saved
                       payment method (or the default one on their Stripe customer). The old record is kept in history.
                     </p>
-                    {!t.currentPropertyId && (
+                    {PROGRAMS[program].managedHousing && !t.currentPropertyId && (
                       <p className="text-sm font-medium text-amber-700 dark:text-amber-300">
                         ⚠️ This tenant isn’t placed in a property, so rent will collect but no partner equity accrues.
                         Approve a move-in first if they live in one of our homes.
@@ -618,12 +644,10 @@ export default async function AdminTenantReviewPage({
                       mode="restart"
                       tenantId={t.id}
                       nonce={randomUUID()}
-                      current={{
-                        baseDollars: t.billing.baseAmountCents / 100,
-                        frequency: t.billing.frequency,
-                        nextDraft: '',
-                      }}
+                      current={{ ...currentSplitDollars, frequency: t.billing.frequency, nextDraft: '' }}
                       minDate={tomorrowDateInput()}
+                      program={program}
+                      monthlyIncome={t.employment.verifiedMonthlyIncome}
                     />
                   </div>
                 )}
@@ -662,12 +686,10 @@ export default async function AdminTenantReviewPage({
                       <RentAdjustForm
                         tenantId={t.id}
                         nonce={randomUUID()}
-                        current={{
-                          baseDollars: t.billing.baseAmountCents / 100,
-                          frequency: t.billing.frequency,
-                          nextDraft: futureDateInput(nextDraftAt),
-                        }}
+                        current={{ ...currentSplitDollars, frequency: t.billing.frequency, nextDraft: futureDateInput(nextDraftAt) }}
                         minDate={tomorrowDateInput()}
+                        program={program}
+                        monthlyIncome={t.employment.verifiedMonthlyIncome}
                       />
                     </div>
 
@@ -737,23 +759,90 @@ export default async function AdminTenantReviewPage({
                   {t.employment.verified
                     ? `(${t.employment.verificationMethod === 'manual' ? 'verified manually' : 'Plaid'}${t.employment.verifiedMonthlyIncome ? ` · ${formatCurrency(t.employment.verifiedMonthlyIncome)}/mo verified` : ''})`
                     : ''}
-                  . Enter the recurring 40% amount, frequency, and first draft date.
+                  . Choose the frequency, confirm the amounts and the first draft date.
                 </p>
                 {t.employment.verifiedWeeklyHours != null && t.employment.verifiedWeeklyHours < REQUIRED_WEEKLY_HOURS && (
                   <p className="text-sm font-medium text-red-600 dark:text-red-400">
                     ⚠️ Verified at {t.employment.verifiedWeeklyHours} hrs/week — below the {REQUIRED_WEEKLY_HOURS}-hour
-                    Effort Exchange requirement. Confirm before starting rent.
+                    program requirement. Confirm before starting collection.
                   </p>
                 )}
                 <TenantBillingForm
                   tenantId={t.id}
-                  suggestedAmount={
-                    t.employment.verifiedMonthlyIncome
-                      ? Math.round(t.employment.verifiedMonthlyIncome * COLLECTION_RATE * 100) / 100
-                      : undefined
-                  }
+                  program={program}
+                  monthlyIncome={t.employment.verifiedMonthlyIncome}
                 />
               </>
+            )}
+          </Card>
+        )}
+
+        {funds && (
+          <Card className="flex flex-col gap-4">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Program funds held</h3>
+            <dl className="grid gap-4 sm:grid-cols-3">
+              {PROGRAMS[program].outsideLandlord && (
+                <>
+                  <Row label="Rent on hand (owed to landlord)" value={formatCents(funds.rentHeldCents)} />
+                  <Row label="Rent collected (all time)" value={formatCents(funds.rentCollectedCents)} />
+                  <Row label="Paid to landlord (all time)" value={formatCents(funds.landlordPaidCents)} />
+                </>
+              )}
+              {PROGRAMS[program].carRate > 0 && (
+                <>
+                  <Row label="Car savings" value={formatCents(funds.carSavingsCents)} />
+                  <Row label="Car deposits (all time)" value={formatCents(funds.carDepositedCents)} />
+                  <Row label="Released for a car" value={formatCents(funds.carReleasedCents)} />
+                </>
+              )}
+            </dl>
+
+            {PROGRAMS[program].outsideLandlord && (
+              <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                <h4 className="font-semibold text-olive-950 dark:text-white">Record a landlord payment</h4>
+                <p className="text-sm text-olive-600 dark:text-olive-500">
+                  Send the rent by bill pay, ACH or check outside the app, then record it here. You can only pay out
+                  rent that has been collected.
+                  {t.landlord?.paymentAddress ? ` Landlord receives rent at: ${t.landlord.paymentAddress}.` : ''}
+                </p>
+                <LandlordPaymentForm
+                  tenantId={t.id}
+                  nonce={randomUUID()}
+                  today={todayDateInput()}
+                  suggestedDollars={
+                    t.landlord ? Math.min(t.landlord.monthlyRentCents, funds.rentHeldCents) / 100 || undefined : undefined
+                  }
+                />
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+              <h4 className="font-semibold text-olive-950 dark:text-white">Adjustment</h4>
+              <LedgerAdjustmentForm
+                tenantId={t.id}
+                nonce={randomUUID()}
+                buckets={[
+                  ...(PROGRAMS[program].outsideLandlord ? (['rent'] as const) : []),
+                  ...(PROGRAMS[program].carRate > 0 ? (['car'] as const) : []),
+                ]}
+              />
+            </div>
+
+            {ledger.length > 0 && (
+              <div className="flex flex-col gap-1 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                <h4 className="font-semibold text-olive-950 dark:text-white">History</h4>
+                <ul className="text-sm text-olive-700 dark:text-olive-300">
+                  {ledger.map((e) => (
+                    <li key={e.id}>
+                      {new Date(e.at).toLocaleDateString()} — {ledgerKindLabel[e.kind]} ({e.bucket === 'rent' ? 'rent' : 'car'}){' '}
+                      {formatCents(e.amountCents)}
+                      {e.method ? ` · ${e.method.replace('_', ' ')}` : ''}
+                      {e.reference ? ` · ${e.reference}` : ''}
+                      {e.note ? ` · ${e.note}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </Card>
         )}
