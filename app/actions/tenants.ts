@@ -13,7 +13,11 @@ import {
   setFeeSession,
   setEmploymentType,
   recordLeaseUpload,
+  setShortfallSession,
 } from '@/lib/tenants'
+import { programOf } from '@/lib/programs'
+import { computeShortfall } from '@/lib/shortfall'
+import { withProcessingFee } from '@/lib/fees'
 import { parseTenantForm } from '@/lib/tenant-input'
 import { saveLeaseFile } from '@/lib/leases'
 import { getStripe, applicationTotalCents } from '@/lib/stripe'
@@ -178,6 +182,70 @@ export async function resumeApplicationPayment(): Promise<void> {
 
   const url = await startFeeCheckout({ userId: session.sub, email: tenant!.email, customerId })
   redirect(url)
+}
+
+/**
+ * Own-landlord tenant pays this month's rent shortfall once via Stripe Checkout.
+ *
+ * Security: the amount is NEVER taken from the request — it's the smaller of
+ * the server-saved notice and a fresh recomputation (a deposit or landlord
+ * payment since the email may have shrunk it). The session carries
+ * `metadata.type: 'rent_shortfall'` so the webhook routes it to the program
+ * ledger (without a type it would be misread as an application fee).
+ */
+export async function payShortfallAction(): Promise<void> {
+  const session = await requireRole('tenant', '/tenants/login')
+  const tenant = await getTenantByUserId(session.sub)
+  if (!tenant || programOf(tenant) !== 'own_landlord') redirect('/tenants')
+  const notice = tenant!.shortfall
+  if (!notice || notice.paidAt) redirect('/tenants')
+  if (!tenant!.stripeCustomerId) redirect('/tenants?shortfall=error')
+
+  const current = await computeShortfall(tenant!, new Date())
+  const amountCents = Math.min(notice!.amountCents, current?.shortfallCents ?? 0)
+  if (amountCents <= 0) redirect('/tenants?shortfall=covered')
+
+  let url: string
+  try {
+    const metadata = {
+      type: 'rent_shortfall',
+      tenantId: tenant!.id,
+      month: notice!.month,
+      baseCents: String(amountCents),
+    }
+    const checkout = await getStripe().checkout.sessions.create(
+      {
+        mode: 'payment',
+        customer: tenant!.stripeCustomerId,
+        payment_method_types: ['us_bank_account', 'card'],
+        line_items: [
+          {
+            quantity: 1,
+            price_data: {
+              currency: 'usd',
+              unit_amount: withProcessingFee(amountCents), // tenant covers processing (app rule)
+              product_data: {
+                name: `Rent balance for ${notice!.month}`,
+                description: 'Difference between your monthly rent and what was collected, plus processing',
+              },
+            },
+          },
+        ],
+        payment_intent_data: { metadata },
+        metadata,
+        success_url: `${baseUrl}/tenants?shortfall=paid`,
+        cancel_url: `${baseUrl}/tenants?shortfall=canceled#shortfall`,
+      },
+      // Same tenant/month/amount within 24h → Stripe replays the same session (no duplicates).
+      { idempotencyKey: `shortfall:${tenant!.id}:${notice!.month}:${amountCents}` },
+    )
+    await setShortfallSession(tenant!.id, notice!.month, checkout.id)
+    url = checkout.url as string
+  } catch (err) {
+    logError('tenants/shortfall-checkout', err, { tenantId: tenant!.id })
+    redirect('/tenants?shortfall=error')
+  }
+  redirect(url) // external redirect to Stripe Checkout — outside try/catch
 }
 
 // Tenants verify income through Plaid only — there is no tenant paystub upload.

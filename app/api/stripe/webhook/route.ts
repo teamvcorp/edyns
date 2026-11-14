@@ -5,11 +5,12 @@ import {
   setBillingStatusBySubscription,
   syncPauseFromStripe,
   getTenantBySubscriptionId,
+  markShortfallPaid,
   type BillingStatus,
   type Tenant,
 } from '@/lib/tenants'
 import { PROGRAMS, programOf } from '@/lib/programs'
-import { recordInvoiceDeposits } from '@/lib/program-ledger'
+import { recordInvoiceDeposits, recordLedgerEntry } from '@/lib/program-ledger'
 import { getPropertyById } from '@/lib/properties'
 import { recordRentEquity } from '@/lib/equity'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
@@ -145,6 +146,34 @@ export async function POST(request: Request): Promise<Response> {
       const invoiceId = session.metadata.invoiceId
       const phase = session.metadata.phase as PaymentPhase | undefined
       if (invoiceId && phase) await recordInvoicePayment(invoiceId, session.id, phase, paid && !failed)
+    } else if (session.metadata?.type === 'rent_shortfall') {
+      // Own-landlord tenant paid this month's rent difference (app/actions/tenants.ts
+      // payShortfallAction). Metadata was written by our server and the event is
+      // signature-verified, so it's trusted. ACH settles later: act only once paid.
+      if (paid && !failed) {
+        const { tenantId, month } = session.metadata
+        const baseCents = Number(session.metadata.baseCents)
+        if (tenantId && month && Number.isInteger(baseCents) && baseCents > 0) {
+          try {
+            await recordLedgerEntry({
+              tenantId,
+              bucket: 'rent',
+              kind: 'shortfall_payment',
+              amountCents: baseCents, // base only — the processing gross-up isn't rent
+              ref: `shortfall:${session.id}`,
+              at: new Date(),
+              source: 'tenant',
+              note: `Rent balance for ${month}`,
+            })
+            await markShortfallPaid(tenantId, month, new Date())
+          } catch (err) {
+            logError('stripe/webhook/shortfall', err, { tenantId })
+            return new Response('Ledger write failed', { status: 500 }) // Stripe retries; idempotent on ref
+          }
+        } else {
+          logWarn('stripe/webhook/shortfall', 'rent_shortfall session with bad metadata', { sessionId: session.id })
+        }
+      }
     } else {
       const pi = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id
       await applyFeeResult(session.id, {

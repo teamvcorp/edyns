@@ -271,6 +271,38 @@ export async function sendRentChangeEmail(input: {
   await sendEmail({ to: input.to, subject: 'Your rent schedule has changed', html })
 }
 
+/**
+ * Own-landlord tenants: what we've collected won't cover this month's rent.
+ * Tells them the balance owed to their landlord, links to the portal where they
+ * can pay the difference once (Checkout), and recommends affordable homes.
+ * Amounts are pre-formatted by the caller.
+ */
+export async function sendRentShortfallEmail(input: {
+  to: string
+  name: string
+  monthLabel: string
+  landlordName: string
+  rent: string
+  onHand: string
+  shortfall: string
+  affordableRent: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Your ${escapeHtml(input.monthLabel)} rent is short, ${escapeHtml(input.name)}</h2>
+      <p>Your rent to <strong>${escapeHtml(input.landlordName)}</strong> is <strong>${escapeHtml(input.rent)}</strong>.
+      We have <strong>${escapeHtml(input.onHand)}</strong> collected for it, so there is a balance of
+      <strong>${escapeHtml(input.shortfall)}</strong> owed to your landlord.</p>
+      <p>You can pay the difference once from your portal and we’ll include it in your rent payment, or pay your
+      landlord directly.</p>
+      <p><a href="${escapeHtml(`${baseUrl}/tenants#shortfall`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Pay the difference</a></p>
+      <p>Most importantly, we want you in a home you can afford. Rent of about <strong>${escapeHtml(input.affordableRent)}</strong>
+      a month or less fits your income. <a href="${escapeHtml(`${baseUrl}/tenants#affordable`)}">See homes within your budget</a>.</p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: `Your ${input.monthLabel} rent has a balance due`, html })
+}
+
 /** Tell a tenant their rent was paused or resumed by our team. */
 export async function sendRentPauseEmail(input: {
   to: string

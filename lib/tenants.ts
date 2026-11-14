@@ -117,6 +117,20 @@ export interface RentCredit {
 export type ApplicationStatus = 'pending' | 'approved' | 'rejected'
 export type FeeStatus = 'unpaid' | 'processing' | 'paid'
 
+/**
+ * Own-landlord monthly rent shortfall (set by the rent-shortfall cron). One per
+ * month: `month` is 'YYYY-MM'. The tenant may pay `amountCents` (base, before
+ * processing fee) once via Checkout; the webhook records it in the program
+ * ledger and sets `paidAt`.
+ */
+export interface ShortfallNotice {
+  month: string
+  amountCents: number
+  notifiedAt: Date
+  checkoutSessionId?: string
+  paidAt?: Date
+}
+
 export interface TenantDoc {
   _id: ObjectId
   userId: ObjectId
@@ -135,6 +149,8 @@ export interface TenantDoc {
   landlord?: Landlord
   /** own_landlord only: lease metadata; the encrypted file lives in `leases` (lib/leases.ts). */
   lease?: { uploadedAt: Date; contentType: string }
+  /** own_landlord only: the latest monthly rent shortfall notice. */
+  shortfall?: ShortfallNotice
   status: ApplicationStatus
   rejectionReason?: string
   fee: {
@@ -275,6 +291,52 @@ export async function createTenantApplication(
   }
   await col.insertOne(doc)
   return toTenant(doc)
+}
+
+// ---- Own-landlord monthly shortfall ----
+
+/** Approved own-landlord tenants with live (non-canceled) collection — the shortfall cron's input. */
+export async function listTenantsForShortfallCheck(): Promise<Tenant[]> {
+  const col = await tenantsCollection()
+  const docs = await col
+    .find({ status: 'approved', program: 'own_landlord', 'billing.status': { $in: ['active', 'past_due', 'paused'] } })
+    .toArray()
+  return docs.map(toTenant)
+}
+
+/**
+ * Save this month's shortfall notice. Atomic + once per month: returns false if
+ * a notice for `month` already exists (cron re-runs never email twice).
+ */
+export async function setShortfallNotice(tenantId: string, month: string, amountCents: number): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const notice: ShortfallNotice = { month, amountCents, notifiedAt: new Date() }
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'shortfall.month': { $ne: month } },
+    { $set: { shortfall: notice, updatedAt: new Date() } },
+  )
+  return res.modifiedCount === 1
+}
+
+/** Remember the Checkout session started for a shortfall (lets the tenant resume it). */
+export async function setShortfallSession(tenantId: string, month: string, sessionId: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId), 'shortfall.month': month },
+    { $set: { 'shortfall.checkoutSessionId': sessionId, updatedAt: new Date() } },
+  )
+}
+
+/** Mark a month's shortfall paid (webhook, after the ledger entry is recorded). */
+export async function markShortfallPaid(tenantId: string, month: string, paidAt: Date): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId), 'shortfall.month': month, 'shortfall.paidAt': { $exists: false } },
+    { $set: { 'shortfall.paidAt': paidAt, updatedAt: new Date() } },
+  )
 }
 
 /** Record that a lease was stored (the file itself is in lib/leases.ts). */

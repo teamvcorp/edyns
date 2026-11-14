@@ -797,6 +797,14 @@ export default async function AdminTenantReviewPage({
               )}
             </dl>
 
+            {t.shortfall && (
+              <p className={t.shortfall.paidAt ? 'text-sm text-olive-700 dark:text-olive-300' : 'text-sm text-amber-700 dark:text-amber-400'}>
+                Shortfall notice for {t.shortfall.month}: {formatCents(t.shortfall.amountCents)} — emailed{' '}
+                {new Date(t.shortfall.notifiedAt).toLocaleDateString()}
+                {t.shortfall.paidAt ? `, paid by tenant ${new Date(t.shortfall.paidAt).toLocaleDateString()}` : ', unpaid'}.
+              </p>
+            )}
+
             {PROGRAMS[program].outsideLandlord && (
               <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
                 <h4 className="font-semibold text-olive-950 dark:text-white">Record a landlord payment</h4>

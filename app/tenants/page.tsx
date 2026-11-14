@@ -3,7 +3,7 @@ import { requireRole } from '@/lib/dal'
 import { getTenantByUserId } from '@/lib/tenants'
 import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
-import { resumeApplicationPayment } from '@/app/actions/tenants'
+import { resumeApplicationPayment, payShortfallAction } from '@/app/actions/tenants'
 import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { PROGRAMS, programOf, rateSummary } from '@/lib/programs'
 import { balancesFor } from '@/lib/program-ledger'
@@ -39,7 +39,7 @@ const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: '
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ identity?: string }>
+  searchParams: Promise<{ identity?: string; shortfall?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -160,6 +160,45 @@ export default async function TenantPortalPage({
           </Text>
         )}
       </Card>
+
+      {/* Own-landlord monthly rent shortfall (set by app/api/cron/rent-shortfall) */}
+      {tenant.shortfall && (!tenant.shortfall.paidAt || sp.shortfall === 'paid') && (
+        <Card id="shortfall" className="flex flex-col gap-3 ring-amber-500/30">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Rent balance due</h3>
+            <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+              {tenant.shortfall.paidAt ? 'Paid' : formatCents(tenant.shortfall.amountCents)}
+            </span>
+          </div>
+          {sp.shortfall === 'paid' || tenant.shortfall.paidAt ? (
+            <Text className="text-sm/6">
+              <p>Thank you — we’ve received your payment and will include it in your rent to your landlord.</p>
+            </Text>
+          ) : sp.shortfall === 'covered' ? (
+            <Text className="text-sm/6">
+              <p>Good news — what we’ve collected now covers this month’s rent. Nothing more is due.</p>
+            </Text>
+          ) : (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  What we collected for {tenant.shortfall.month} won’t cover your full rent. You can pay the difference
+                  once here (plus Stripe processing) and we’ll include it in your landlord payment, or pay your landlord
+                  directly.
+                </p>
+              </Text>
+              {sp.shortfall === 'error' && (
+                <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                  We couldn’t start the payment. Please try again, or reply to our email for help.
+                </p>
+              )}
+              <form action={payShortfallAction}>
+                <Button type="submit">Pay {formatCents(tenant.shortfall.amountCents)}</Button>
+              </form>
+            </>
+          )}
+        </Card>
+      )}
 
       {/* Property they found us through (reassurance only) */}
       {hintedProperty && (
