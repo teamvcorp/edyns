@@ -303,6 +303,26 @@ export async function sendRentShortfallEmail(input: {
   await sendEmail({ to: input.to, subject: `Your ${input.monthLabel} rent has a balance due`, html })
 }
 
+/** Car Savings: an admin offered the tenant a vehicle their savings cover. */
+export async function sendCarOfferEmail(input: {
+  to: string
+  name: string
+  vehicle: string
+  price: string
+  savings: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Your car savings are ready, ${escapeHtml(input.name)}</h2>
+      <p>You’ve saved <strong>${escapeHtml(input.savings)}</strong>, and we have a car that fits:</p>
+      <p style="font-size:16px"><strong>${escapeHtml(input.vehicle)}</strong> — ${escapeHtml(input.price)}</p>
+      <p>Review the offer in your portal to accept or decline it.</p>
+      <p><a href="${escapeHtml(`${baseUrl}/tenants#car-offer`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Review the offer</a></p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: 'A car offer is waiting for you', html })
+}
+
 /** Tell a tenant their rent was paused or resumed by our team. */
 export async function sendRentPauseEmail(input: {
   to: string

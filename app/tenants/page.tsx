@@ -8,6 +8,8 @@ import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { PROGRAMS, programOf, rateSummary } from '@/lib/programs'
 import { balancesFor } from '@/lib/program-ledger'
 import { affordablePropertiesFor } from '@/lib/affordable-homes'
+import { getOpenCarOffer } from '@/lib/car-offers'
+import { respondCarOfferAction } from '@/app/actions/car-offers'
 import { PublicPropertyCard } from '@/components/properties/public-property-card'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
@@ -19,7 +21,7 @@ import { hasActiveRequest } from '@/lib/moveins'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
-import { Button, ButtonLink } from '@/components/elements/button'
+import { Button, ButtonLink, SoftButton } from '@/components/elements/button'
 import { Link } from '@/components/elements/link'
 
 export const metadata: Metadata = { title: 'Tenant portal' }
@@ -41,7 +43,7 @@ const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: '
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ identity?: string; shortfall?: string }>
+  searchParams: Promise<{ identity?: string; shortfall?: string; car?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -66,6 +68,7 @@ export default async function TenantPortalPage({
   const def = PROGRAMS[program]
   // Money edynsgate holds for this tenant (own_landlord / car_only only).
   const funds = !def.managedHousing && tenant.status === 'approved' ? await balancesFor(tenant.id) : null
+  const carOffer = def.carRate > 0 && tenant.status === 'approved' ? await getOpenCarOffer(tenant.id) : null
   // Homes within budget (rent ≤ 30% of income) for approved tenants not yet in one of our homes.
   const budgetIncome = tenant.employment.verifiedMonthlyIncome ?? tenant.employment.monthlyIncome
   const affordable =
@@ -166,6 +169,49 @@ export default async function TenantPortalPage({
           </Text>
         )}
       </Card>
+
+      {/* Car offer from our team (lib/car-offers.ts) */}
+      {(carOffer || sp.car) && (
+        <Card id="car-offer" className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your car offer</h3>
+          {carOffer ? (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  <strong>{carOffer.vehicle}</strong> — {formatCents(carOffer.priceCents)}, paid from your car savings.
+                </p>
+                {carOffer.notes && <p>{carOffer.notes}</p>}
+              </Text>
+              {carOffer.status === 'offered' ? (
+                <div className="flex flex-wrap gap-3">
+                  <form action={respondCarOfferAction}>
+                    <input type="hidden" name="offerId" value={carOffer.id} />
+                    <input type="hidden" name="decision" value="accept" />
+                    <Button type="submit">Accept this car</Button>
+                  </form>
+                  <form action={respondCarOfferAction}>
+                    <input type="hidden" name="offerId" value={carOffer.id} />
+                    <input type="hidden" name="decision" value="decline" />
+                    <SoftButton type="submit">Decline</SoftButton>
+                  </form>
+                </div>
+              ) : (
+                <Text className="text-sm/6">
+                  <p>You accepted this car. Our team will contact you to finish the purchase.</p>
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text className="text-sm/6">
+              <p>
+                {sp.car === 'declined'
+                  ? 'You declined the offer. Your savings stay with us, and we’ll let you know when another car fits.'
+                  : 'Thanks — our team will contact you to finish the purchase.'}
+              </p>
+            </Text>
+          )}
+        </Card>
+      )}
 
       {/* Own-landlord monthly rent shortfall (set by app/api/cron/rent-shortfall) */}
       {tenant.shortfall && (!tenant.shortfall.paidAt || sp.shortfall === 'paid') && (

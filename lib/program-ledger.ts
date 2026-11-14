@@ -210,6 +210,12 @@ export async function balancesFor(tenantId: string): Promise<ProgramBalances> {
   return (await balancesForTenants([tenantId])).get(tenantId) ?? { ...EMPTY }
 }
 
+/** True when an entry with this idempotency ref already exists. */
+export async function hasLedgerRef(ref: string): Promise<boolean> {
+  const col = await ledgerCollection()
+  return (await col.countDocuments({ ref }, { limit: 1 })) > 0
+}
+
 /** Most recent entries first. */
 export async function listLedger(tenantId: string, limit = 50): Promise<LedgerEntry[]> {
   if (!ObjectId.isValid(tenantId)) return []

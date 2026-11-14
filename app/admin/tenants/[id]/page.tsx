@@ -19,6 +19,9 @@ import { StripeLinkForm } from '@/components/admin/stripe-link-form'
 import { RentPauseForm } from '@/components/admin/rent-pause-form'
 import { LandlordPaymentForm, LedgerAdjustmentForm } from '@/components/admin/program-funds-forms'
 import { balancesFor, listLedger } from '@/lib/program-ledger'
+import { listCarOffers } from '@/lib/car-offers'
+import { CarOfferForm, MarkCarPurchasedForm } from '@/components/admin/car-offer-forms'
+import { withdrawCarOfferAction } from '@/app/actions/car-offers'
 import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
@@ -152,9 +155,10 @@ export default async function AdminTenantReviewPage({
   const nextDraftAt = liveRent?.nextDraftAt ?? t.billing?.nextDraftAt ?? t.billing?.firstDraftAt
   // Program funds (own_landlord / car_only): balances + recent ledger entries.
   const holdsFunds = !PROGRAMS[program].managedHousing
-  const [funds, ledger] = holdsFunds
-    ? await Promise.all([balancesFor(t.id), listLedger(t.id, 25)])
-    : [null, []]
+  const [funds, ledger, carOffers] = holdsFunds
+    ? await Promise.all([balancesFor(t.id), listLedger(t.id, 25), listCarOffers(t.id)])
+    : [null, [], []]
+  const openOffer = carOffers.find((o) => o.status === 'offered' || o.status === 'accepted')
   // e.g. "visa •••• 4242" — never the full number.
   const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
@@ -821,6 +825,50 @@ export default async function AdminTenantReviewPage({
                     t.landlord ? Math.min(t.landlord.monthlyRentCents, funds.rentHeldCents) / 100 || undefined : undefined
                   }
                 />
+              </div>
+            )}
+
+            {PROGRAMS[program].carRate > 0 && (
+              <div id="car-offer" className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                <h4 className="font-semibold text-olive-950 dark:text-white">Car offer</h4>
+                {openOffer ? (
+                  <div className="flex flex-col gap-3">
+                    <p className="text-sm text-olive-950 dark:text-white">
+                      <strong>{openOffer.vehicle}</strong> — {formatCents(openOffer.priceCents)} ·{' '}
+                      {openOffer.status === 'accepted' ? 'Accepted by tenant' : 'Waiting for tenant'} (offered{' '}
+                      {new Date(openOffer.createdAt).toLocaleDateString()})
+                    </p>
+                    {openOffer.status === 'accepted' && <MarkCarPurchasedForm offerId={openOffer.id} />}
+                    <form action={withdrawCarOfferAction}>
+                      <input type="hidden" name="offerId" value={openOffer.id} />
+                      <SoftButton type="submit" className="text-red-600 dark:text-red-400">
+                        Withdraw offer
+                      </SoftButton>
+                    </form>
+                  </div>
+                ) : funds.carSavingsCents > 0 ? (
+                  <>
+                    <p className="text-sm text-olive-600 dark:text-olive-500">
+                      Offer an available car priced at or below their savings ({formatCents(funds.carSavingsCents)}).
+                      The tenant accepts or declines in their portal.
+                    </p>
+                    <CarOfferForm tenantId={t.id} maxDollars={funds.carSavingsCents / 100} />
+                  </>
+                ) : (
+                  <p className="text-sm text-olive-600 dark:text-olive-500">No car savings yet.</p>
+                )}
+                {carOffers.filter((o) => o.id !== openOffer?.id).length > 0 && (
+                  <ul className="text-sm text-olive-700 dark:text-olive-300">
+                    {carOffers
+                      .filter((o) => o.id !== openOffer?.id)
+                      .map((o) => (
+                        <li key={o.id}>
+                          {new Date(o.createdAt).toLocaleDateString()} — {o.vehicle}, {formatCents(o.priceCents)} ·{' '}
+                          {o.status}
+                        </li>
+                      ))}
+                  </ul>
+                )}
               </div>
             )}
 
