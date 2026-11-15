@@ -1,6 +1,9 @@
 # Plan: collect the program percentage from every paycheck (Plaid Transactions)
 
-Status: **PLANNED — not started.** Decided 2026-11-14 (option A). Build locally; **do not push until Plaid
+Status: **BUILT locally (2026-11-14), behind `PAYCHECK_COLLECTION_ENABLED` (off by default). Sandbox E2E passed 14/14
+(sync, no back-charging, classification, split + fee, bank-only debit, no double debit, signed webhook → ledger,
+idempotent); AI statement read passed on the Plaid sandbox mock statement (~$0.03). Pending: paused-mode check
+(Plaid sandbox rate limit), Plaid production approval, counsel review. NOT pushed.** Originally: Decided 2026-11-14 (option A). Build locally; **do not push until Plaid
 approves Transactions for production.** Ships behind a feature flag either way.
 
 ## Context
