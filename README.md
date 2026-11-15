@@ -132,7 +132,7 @@ components/
   invoices/               public invoice summary
 proxy.ts                  Route protection (Next 16 "Middleware")
 scripts/                  seed.mjs + Plaid sandbox/e2e probe scripts
-docs/                     stripe-identity-setup.md + vendor notes (Resend receiving)
+docs/                     stripe-identity-setup.md + vendor notes (Resend, Stripe rent billing, Plaid Auth)
 vercel.json               Cron: /api/cron/income-check daily at 12:00 UTC
 ```
 
@@ -233,3 +233,5 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 - [`SISTER-APPS.md`](./SISTER-APPS.md) / [`SEO-BACKLINKS.md`](./SEO-BACKLINKS.md) — VA Corp network cross-linking (footer + JSON-LD).
 - [`STRIPE_IDENTITY_SETUP.md`](./STRIPE_IDENTITY_SETUP.md) — generic Stripe Identity guide; [`docs/stripe-identity-setup.md`](./docs/stripe-identity-setup.md) — how **this** app implements it.
 - [`docs/vendor/resend-receiving-emails.md`](./docs/vendor/resend-receiving-emails.md) — Resend inbound-email notes.
+- [`docs/vendor/plaid-auth.md`](./docs/vendor/plaid-auth.md) — Plaid Auth integration notes (reference only; we use Plaid Income, Stripe collects bank payments).
+- [`docs/vendor/stripe-rent-billing.md`](./docs/vendor/stripe-rent-billing.md) — Stripe rent subscription behaviour, incl. program rent/car split.
