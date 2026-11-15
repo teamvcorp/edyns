@@ -149,7 +149,7 @@ export interface BankLink {
 /**
  * The tenant's authorization for variable per-paycheck debits (Nacha: disclose
  * how amounts are calculated; Reg E: variable-amount range). Kept verbatim so it
- * can be produced as proof of authorization. LEGAL REVIEW before launch.
+ * can be produced as proof of authorization. Wording reviewed by counsel 2026-11-14.
  */
 export interface PaycheckAuthorization {
   acceptedAt: Date

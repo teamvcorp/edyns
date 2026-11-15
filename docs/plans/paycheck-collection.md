@@ -3,7 +3,7 @@
 Status: **BUILT locally (2026-11-14), behind `PAYCHECK_COLLECTION_ENABLED` (off by default). Sandbox E2E passed 14/14
 (sync, no back-charging, classification, split + fee, bank-only debit, no double debit, signed webhook → ledger,
 idempotent); AI statement read passed on the Plaid sandbox mock statement (~$0.03). Pending: paused-mode check
-(Plaid sandbox rate limit), Plaid production approval, counsel review. NOT pushed.** Originally: Decided 2026-11-14 (option A). Build locally; **do not push until Plaid
+(Plaid sandbox rate limit), Plaid production approval. Legal review DONE 2026-11-14. NOT pushed.** Originally: Decided 2026-11-14 (option A). Build locally; **do not push until Plaid
 approves Transactions for production.** Ships behind a feature flag either way.
 
 ## Context
@@ -19,7 +19,7 @@ Key constraints found while planning:
   and debits should be on the **same account** — compare Plaid account mask with Stripe `us_bank_account.last4`.
 - Variable-amount recurring debits need an explicit authorization that states **how the amount is calculated**
   (Nacha/Stripe) and Reg E **variable-amount notice** (or a consumer-elected range). See
-  `docs/vendor/stripe-ach-variable-debits.md`. **Counsel review before launch.**
+  `docs/vendor/stripe-ach-variable-debits.md`. **Reviewed by counsel 2026-11-14.**
 - ACH settles in up to 4 business days and can be disputed for 60 days; a dispute kills the mandate.
 
 ## Approach
@@ -33,7 +33,7 @@ Everything reuses existing pieces: program rates + split (`lib/programs.ts`), `w
 webhook verification (`verifyPlaidWebhook`), logging (`lib/log.ts`), rate limits, email senders.
 
 ### Phase 1 — Foundations
-- `PAYCHECK_COLLECTION_ENABLED` env flag (off by default; production stays off until Plaid approval + legal).
+- `PAYCHECK_COLLECTION_ENABLED` env flag (off by default; production stays off until Plaid approves Transactions + Statements — legal review done 2026-11-14).
 - Tenant model: `bankLink { itemId, accessTokenEnc, accountId, mask, institution, cursor, status, linkedAt,
   collectFrom: Date }` and `billing.mode`.
 - New `lib/paychecks.ts` + `deposits` collection: `{ tenantId, plaidTransactionId (unique), accountId, amountCents,
@@ -67,7 +67,7 @@ webhook verification (`verifyPlaidWebhook`), logging (`lib/log.ts`), rate limits
 ### Phase 4 — Authorization (legal)
 - Tenant authorization screen before paycheck mode: "edynsgate will debit X% (rent / car breakdown) plus processing
   of each paycheck deposited to ••1234, within [range]". Store acceptance (timestamp, IP, text version).
-- Per-debit receipt email; out-of-range notice. Terms/Privacy updates. **Lawyer review gate.**
+- Per-debit receipt email; out-of-range notice. Terms/Privacy updates. **Reviewed by counsel 2026-11-14.**
 
 ### Phase 5 — Collection engine
 - For each `wages` (or admin-included) deposit: split by program rates → `withProcessingFee` → PaymentIntent
@@ -116,7 +116,7 @@ For tenants whose **payroll can't be found** (Plaid Income returns nothing, or t
   the tenant. Runs on admin request (or automatically after statements arrive), once per statement set; cache the
   result with the statement record.
 - Privacy/security: statements are sensitive PII sent to Anthropic for processing — disclose in Privacy, include
-  in counsel review; consider a zero-data-retention agreement with Anthropic. Log ids + totals only, never
+  in the reviewed Privacy page; consider a zero-data-retention agreement with Anthropic. Log ids + totals only, never
   statement content. Key in `ANTHROPIC_API_KEY` (Vercel env, never committed; local `.env.local`).
 - Est. cost ≈ $0.10–$0.25 per tenant review (3 statements × ~5–10 pages at Opus 5.5 $4 / $20 per MTok).
 
@@ -147,5 +147,5 @@ For tenants whose **payroll can't be found** (Plaid Income returns nothing, or t
   staff review PDF statements for total deposits (Phase 7).
 - **AI statement reading:** Claude (Opus 5.5) extracts deposit lines; code totals; admin decides (Phase 7b).
   Needs `ANTHROPIC_API_KEY` (user obtaining it 2026-11-14).
-- Still requires: Plaid Transactions **and Statements** production approval, lawyer review of the authorization +
-  Terms.
+- Still requires: Plaid Transactions **and Statements** production approval. (Lawyer review of the authorization +
+  Terms: done 2026-11-14.)

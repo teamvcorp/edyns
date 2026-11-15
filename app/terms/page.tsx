@@ -1,10 +1,8 @@
 import React from "react";
 
-// LEGAL REVIEW REQUIRED before launch (2026-11-14): section 2 covers the
-// outside-landlord programs (collecting rent we forward to third-party
-// landlords) and the car program (a company-owned vehicle + insurance provided
-// for 10% of wages after a trust period, returned if payments stop). Rates come
-// from lib/programs.ts; keep this text in sync if they change.
+// Reviewed by counsel 2026-11-14 (programs, landlord payments, car program,
+// available rent funds). Rates come from lib/programs.ts — keep this text in sync
+// if they change, and have counsel re-review any material change.
 
 export default function TermsOfService() {
   return (

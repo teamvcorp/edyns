@@ -19,7 +19,7 @@ import { logError, logWarn } from './log'
  *  - Statement text is untrusted DATA: the system prompt tells the model to
  *    ignore any instructions inside the document (prompt-injection safety).
  *  - Privacy: statements are sent to Anthropic for processing (disclosed in the
- *    Privacy page; counsel review). We log ids and counts only — never content.
+ *    Privacy page). We log ids and counts only — never content.
  *  - Failures (API error, refusal, unparseable output) fall back to plain manual
  *    review; the tenant is never blocked.
  * SDK usage per Anthropic's TypeScript reference (beta parse + server-side

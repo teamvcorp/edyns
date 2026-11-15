@@ -1,7 +1,7 @@
 import React from "react";
 
-// LEGAL REVIEW REQUIRED before launch (2026-11-14): sections 1 and 7 describe
-// the outside-landlord programs and the car program (lib/programs.ts).
+// Reviewed by counsel 2026-11-14 (sections 1 and 7: outside-landlord programs and
+// the car program). Rates come from lib/programs.ts — keep in sync.
 
 export default function PrivacyPolicy() {
   return (

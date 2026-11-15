@@ -47,7 +47,7 @@ import { logError, logWarn } from './log'
 
 // ---- Configuration -------------------------------------------------------------
 
-/** Master switch. Off by default; production stays off until Plaid approval + legal review. */
+/** Master switch. Off by default; production stays off until Plaid approves Transactions + Statements. */
 export function paycheckCollectionEnabled(): boolean {
   return process.env.PAYCHECK_COLLECTION_ENABLED === 'true'
 }
@@ -199,7 +199,7 @@ export function defaultRangeMaxCents(tenant: Tenant): number {
   return Math.max(0, Math.round(income * 100 * (rentRate + carRate)))
 }
 
-/** The exact authorization text the tenant accepts (stored verbatim). LEGAL REVIEW. */
+/** The exact authorization text the tenant accepts (stored verbatim). Reviewed by counsel 2026-11-14 — bump AUTHORIZATION_VERSION on any change. */
 export function buildAuthorizationText(tenant: Tenant, accountMask: string | undefined, rangeMaxCents: number): string {
   const program = programOf(tenant)
   return [

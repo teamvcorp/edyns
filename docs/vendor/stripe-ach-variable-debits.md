@@ -2,7 +2,7 @@
 
 Sources (fetched 2026-11-14): https://docs.stripe.com/payments/ach-direct-debit and
 https://docs.stripe.com/payments/ach-direct-debit/set-up-payment (Direct API). Re-check before coding.
-Legal points here are NOT legal advice — have counsel confirm (Nacha + Reg E).
+Legal points (Nacha + Reg E) and our authorization approach were reviewed by counsel on 2026-11-14.
 
 ## Saved bank account → later debits
 
@@ -39,7 +39,7 @@ Legal points here are NOT legal advice — have counsel confirm (Nacha + Reg E).
   **unless** the consumer elects to be notified only when an amount falls outside a range they specified.
   → Plan: in-app authorization stating "X% of each paycheck deposited to account ••1234", tenant sets/accepts a
   per-debit range; we email a receipt for every debit and a notice whenever one falls outside the range.
-  **Counsel to confirm.**
+  **Reviewed by counsel 2026-11-14.**
 
 ## Test bank accounts (manual entry, routing 110000000)
 
