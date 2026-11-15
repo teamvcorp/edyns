@@ -2,14 +2,17 @@
 
 import { useCallback, useEffect, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { usePlaidLink } from 'react-plaid-link'
+import { usePlaidLink, type PlaidLinkOnSuccessMetadata } from 'react-plaid-link'
 import { completePlaidLink } from '@/app/actions/plaid'
+import { completeBankLink, completeBankRelink } from '@/app/actions/paychecks'
 import { Link } from '@/components/elements/link'
 
 /**
  * OAuth continuation page. After a bank's OAuth flow, Plaid redirects here; we
  * re-initialize Link with the original link token (stashed in localStorage) plus
- * the received redirect URI, then resume automatically.
+ * the received redirect URI, then resume automatically. `plaid_link_purpose`
+ * (set by BankLinkButton) routes the result: income verification (default),
+ * a new paycheck bank link, or an update-mode re-link.
  */
 export function PlaidOAuthReturn() {
   const router = useRouter()
@@ -24,14 +27,27 @@ export function PlaidOAuthReturn() {
   }, [])
 
   const onSuccess = useCallback(
-    (publicToken: string) => {
+    (publicToken: string, metadata: PlaidLinkOnSuccessMetadata) => {
+      // Read the purpose at completion time (no extra state needed).
+      let purpose: string | null = null
+      try {
+        purpose = localStorage.getItem('plaid_link_purpose')
+      } catch (e) {
+        console.warn('[plaid-oauth-return] localStorage unavailable:', e)
+      }
       try {
         localStorage.removeItem('plaid_link_token')
+        localStorage.removeItem('plaid_link_purpose')
       } catch (e) {
         console.warn('[plaid-oauth-return] localStorage unavailable:', e)
       }
       startTransition(async () => {
-        const res = await completePlaidLink(publicToken)
+        const res =
+          purpose === 'bank-link'
+            ? await completeBankLink(publicToken, metadata.accounts?.[0]?.id ?? '')
+            : purpose === 'bank-relink'
+              ? await completeBankRelink()
+              : await completePlaidLink(publicToken)
         if (res?.error) setError(res.error)
         else router.replace('/tenants')
       })

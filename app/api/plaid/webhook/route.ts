@@ -7,7 +7,10 @@ import {
   flagTenantForReview,
   type Tenant,
 } from '@/lib/tenants'
-import { sendSecurityAlert } from '@/lib/email'
+import { sendSecurityAlert, sendBankRelinkEmail } from '@/lib/email'
+import { getTenantByBankItem, setBankLinkStatus } from '@/lib/tenants'
+import { syncByPlaidItem } from '@/lib/paychecks'
+import { fetchStatementsForTenant } from '@/lib/statements'
 import { logError, logWarn } from '@/lib/log'
 
 /** Flag a tenant for manual review and alert ops (best-effort). */
@@ -43,6 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     verification_status?: string
     item_id?: string
     user_id?: string
+    error?: { error_code?: string } | null
   }
   try {
     event = JSON.parse(rawBody)
@@ -85,6 +89,45 @@ export async function POST(request: Request): Promise<Response> {
           }
         } else if (failed) {
           await flagAndAlert(tenant, `Income verification did not complete (${status || code})`)
+        }
+      }
+    }
+  }
+
+  // ---- Paycheck bank connection (Transactions / Statements; lib/paychecks.ts) ----
+  if (event.item_id) {
+    if (event.webhook_type === 'TRANSACTIONS' && event.webhook_code === 'SYNC_UPDATES_AVAILABLE') {
+      try {
+        await syncByPlaidItem(event.item_id)
+      } catch (err) {
+        // Don't make Plaid retry forever — the daily fallback sync (cron/paycheck-sync) catches up.
+        logError('plaid/webhook/transactions-sync', err, { itemId: event.item_id })
+      }
+    } else if (
+      (event.webhook_type === 'ITEM' &&
+        (event.webhook_code === 'PENDING_DISCONNECT' ||
+          event.webhook_code === 'USER_PERMISSION_REVOKED' ||
+          event.webhook_code === 'PENDING_EXPIRATION' ||
+          (event.webhook_code === 'ERROR' && event.error?.error_code === 'ITEM_LOGIN_REQUIRED')))
+    ) {
+      // The connection needs the tenant: collections pause automatically
+      // (collectionBlocker requires an active link) until they reconnect.
+      const tenant = await getTenantByBankItem(event.item_id)
+      if (tenant) {
+        await setBankLinkStatus(tenant.id, 'needs_relink', event.webhook_code)
+        try {
+          await sendBankRelinkEmail({ to: tenant.email, name: tenant.name })
+        } catch (err) {
+          logError('plaid/webhook/relink-email', err, { tenantId: tenant.id })
+        }
+      }
+    } else if (event.webhook_type === 'STATEMENTS' && event.webhook_code === 'STATEMENTS_REFRESH_COMPLETE') {
+      const tenant = await getTenantByBankItem(event.item_id)
+      if (tenant) {
+        try {
+          await fetchStatementsForTenant(tenant.id)
+        } catch (err) {
+          logError('plaid/webhook/statements', err, { tenantId: tenant.id })
         }
       }
     }

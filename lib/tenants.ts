@@ -123,6 +123,57 @@ export type FeeStatus = 'unpaid' | 'processing' | 'paid'
  * processing fee) once via Checkout; the webhook records it in the program
  * ledger and sets `paidAt`.
  */
+/**
+ * Bank connection for per-paycheck collection (Plaid Transactions; see
+ * docs/plans/paycheck-collection.md). The SAME account is watched for paychecks
+ * and debited through Stripe — `mask` must match the Stripe bank account's last 4.
+ */
+export interface BankLink {
+  itemId: string
+  /** AES-256-GCM encrypted Plaid access token (lib/crypto.ts). Never sent to the browser. */
+  accessTokenEnc: string
+  /** The checking/savings account the paycheck lands in. */
+  accountId: string
+  mask?: string
+  institution?: string
+  /** /transactions/sync cursor; advanced only after a complete pagination run. */
+  cursor?: string
+  status: 'active' | 'needs_relink' | 'removed'
+  statusReason?: string
+  linkedAt: Date
+  lastSyncedAt?: Date
+  /** Plaid Statements (income fallback): consent collected via additional_consented_products. */
+  statements?: { requestedAt?: Date; status?: 'needs_consent' | 'fetched' | 'unsupported' | 'error'; fetchedAt?: Date }
+}
+
+/**
+ * The tenant's authorization for variable per-paycheck debits (Nacha: disclose
+ * how amounts are calculated; Reg E: variable-amount range). Kept verbatim so it
+ * can be produced as proof of authorization. LEGAL REVIEW before launch.
+ */
+export interface PaycheckAuthorization {
+  acceptedAt: Date
+  /** Version id of the authorization text shown (lib/paychecks.ts AUTHORIZATION_VERSION). */
+  textVersion: string
+  /** The exact text the tenant accepted. */
+  text: string
+  /** Debits above this (base, before fee) are held for review instead of auto-collected. */
+  rangeMaxCents: number
+  accountMask?: string
+  ip?: string
+  userAgent?: string
+}
+
+/** Per-paycheck collection mode state (absent = fixed schedule via `billing`). */
+export interface PaycheckMode {
+  status: 'active' | 'paused'
+  startedAt: Date
+  /** Deposits dated before this are NEVER collected (initial sync returns history). */
+  collectFrom: Date
+  pausedAt?: Date
+  pausedReason?: string
+}
+
 export interface ShortfallNotice {
   month: string
   amountCents: number
@@ -151,6 +202,10 @@ export interface TenantDoc {
   lease?: { uploadedAt: Date; contentType: string }
   /** Outside-landlord programs only: the latest monthly rent shortfall notice. */
   shortfall?: ShortfallNotice
+  /** Per-paycheck collection (feature-flagged): bank connection, authorization, mode. */
+  bankLink?: BankLink
+  paycheckAuthorization?: PaycheckAuthorization
+  paycheck?: PaycheckMode
   status: ApplicationStatus
   rejectionReason?: string
   fee: {
@@ -232,6 +287,7 @@ async function tenantsCollection(): Promise<Collection<TenantDoc>> {
   await col.createIndex({ plaidItemId: 1 })
   await col.createIndex({ plaidUserId: 1 })
   await col.createIndex({ program: 1 })
+  await col.createIndex({ 'bankLink.itemId': 1 })
   return col
 }
 
@@ -340,6 +396,83 @@ export async function markShortfallPaid(tenantId: string, month: string, paidAt:
   await col.updateOne(
     { _id: new ObjectId(tenantId), 'shortfall.month': month, 'shortfall.paidAt': { $exists: false } },
     { $set: { 'shortfall.paidAt': paidAt, updatedAt: new Date() } },
+  )
+}
+
+// ---- Per-paycheck collection (docs/plans/paycheck-collection.md) ----
+
+/** Save a new bank connection (replaces any previous one; the caller removes the old Plaid Item). */
+export async function setBankLink(tenantId: string, link: BankLink): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { bankLink: link, updatedAt: new Date() } })
+}
+
+export async function getTenantByBankItem(itemId: string): Promise<Tenant | null> {
+  if (!itemId) return null
+  const col = await tenantsCollection()
+  const doc = await col.findOne({ 'bankLink.itemId': itemId })
+  return doc ? toTenant(doc) : null
+}
+
+/** Advance the sync cursor — only after a COMPLETE /transactions/sync pagination run. */
+export async function setBankCursor(tenantId: string, cursor: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    { $set: { 'bankLink.cursor': cursor, 'bankLink.lastSyncedAt': new Date(), updatedAt: new Date() } },
+  )
+}
+
+export async function setBankLinkStatus(tenantId: string, status: BankLink['status'], reason?: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    { $set: { 'bankLink.status': status, 'bankLink.statusReason': reason, updatedAt: new Date() } },
+  )
+}
+
+export async function setStatementsState(tenantId: string, state: NonNullable<BankLink['statements']>): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { 'bankLink.statements': state, updatedAt: new Date() } })
+}
+
+/** Tenants with an active bank connection (fallback sync cron). */
+export async function listTenantsWithActiveBankLinks(): Promise<Tenant[]> {
+  const col = await tenantsCollection()
+  const docs = await col.find({ 'bankLink.status': 'active' }).toArray()
+  return docs.map(toTenant)
+}
+
+export async function recordPaycheckAuthorization(tenantId: string, auth: PaycheckAuthorization): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { paycheckAuthorization: auth, updatedAt: new Date() } })
+}
+
+/** Turn paycheck mode on (or back on). `collectFrom` = now unless resuming keeps the original. */
+export async function startPaycheckMode(tenantId: string, opts: { keepCollectFrom?: boolean } = {}): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  const now = new Date()
+  const existing = opts.keepCollectFrom ? await col.findOne({ _id: new ObjectId(tenantId) }) : null
+  const mode: PaycheckMode = {
+    status: 'active',
+    startedAt: existing?.paycheck?.startedAt ?? now,
+    collectFrom: existing?.paycheck?.collectFrom ?? now,
+  }
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { paycheck: mode, updatedAt: now } })
+}
+
+export async function pausePaycheckMode(tenantId: string, reason: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId), paycheck: { $exists: true } },
+    { $set: { 'paycheck.status': 'paused', 'paycheck.pausedAt': new Date(), 'paycheck.pausedReason': reason, updatedAt: new Date() } },
   )
 }
 

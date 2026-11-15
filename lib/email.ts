@@ -318,6 +318,59 @@ export async function sendCarAssignedEmail(input: { to: string; name: string; ve
   await sendEmail({ to: input.to, subject: 'Your car is ready', html })
 }
 
+/**
+ * Per-paycheck collection receipt — sent for EVERY debit we initiate, so the
+ * tenant always knows the amount and date (part of the variable-amount debit
+ * disclosures; see docs/vendor/stripe-ach-variable-debits.md). Amounts pre-formatted.
+ */
+export async function sendPaycheckCollectionEmail(input: {
+  to: string
+  name: string
+  depositAmount: string
+  depositDate: string
+  percent: string
+  breakdown: string
+  charged: string
+  accountMask?: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">We’re collecting from your paycheck, ${escapeHtml(input.name)}</h2>
+      <p>Your deposit of <strong>${escapeHtml(input.depositAmount)}</strong> on ${escapeHtml(input.depositDate)}
+      arrived. As you authorized, we’re drafting <strong>${escapeHtml(input.charged)}</strong>
+      (${escapeHtml(input.percent)} — ${escapeHtml(input.breakdown)}, plus processing) from your account
+      ${input.accountMask ? `ending in ${escapeHtml(input.accountMask)}` : ''}.</p>
+      <p>Bank drafts usually complete within 4 business days.</p>
+      <p><a href="${escapeHtml(`${baseUrl}/tenants#paycheck`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View your portal</a></p>
+      <p style="color:#6b6b60;font-size:13px">Questions, or think this is wrong? Reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: `Paycheck collection: ${input.charged}`, html })
+}
+
+/** A per-paycheck debit failed (e.g. insufficient funds). */
+export async function sendPaycheckFailedEmail(input: { to: string; name: string; charged: string; reason: string }): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">A paycheck collection didn’t go through, ${escapeHtml(input.name)}</h2>
+      <p>We tried to draft <strong>${escapeHtml(input.charged)}</strong> but the bank returned it
+      (${escapeHtml(input.reason)}). Our team will follow up — you don’t need to do anything right now.</p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: 'A paycheck collection didn’t go through', html })
+}
+
+/** The bank connection we watch for paychecks needs the tenant to sign in again. */
+export async function sendBankRelinkEmail(input: { to: string; name: string }): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">Please reconnect your bank, ${escapeHtml(input.name)}</h2>
+      <p>Your bank asked you to sign in again before we can keep seeing your paychecks. Until then, paycheck
+      collections are paused.</p>
+      <p><a href="${escapeHtml(`${baseUrl}/tenants#paycheck`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">Reconnect your bank</a></p>
+    </div>`
+  await sendEmail({ to: input.to, subject: 'Please reconnect your bank', html })
+}
+
 /** Tell a tenant their rent was paused or resumed by our team. */
 export async function sendRentPauseEmail(input: {
   to: string

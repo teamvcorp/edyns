@@ -123,12 +123,14 @@ export async function recordLedgerEntry(input: {
 }
 
 /**
- * Record the rent and car parts of a paid program invoice (webhook). Each part
- * has its own ref so a partial failure + retry fills only what's missing.
+ * Record the rent and car parts of one successful payment (a paid subscription
+ * invoice, or a per-paycheck collection). Each part gets its own ref
+ * (`<ref>:rent`, `<ref>:car`) so a partial failure + retry fills only what's missing.
  */
-export async function recordInvoiceDeposits(input: {
+export async function recordPaymentDeposits(input: {
   tenantId: string
-  invoiceId: string
+  /** Stable payment id with a type prefix, e.g. `inv:in_123` or `pi:pi_123`. */
+  ref: string
   rentCents: number
   carCents: number
   paidAt: Date
@@ -139,7 +141,7 @@ export async function recordInvoiceDeposits(input: {
       bucket: 'rent',
       kind: 'deposit',
       amountCents: input.rentCents,
-      ref: `inv:${input.invoiceId}:rent`,
+      ref: `${input.ref}:rent`,
       at: input.paidAt,
       source: 'stripe',
     })
@@ -150,11 +152,28 @@ export async function recordInvoiceDeposits(input: {
       bucket: 'car',
       kind: 'deposit',
       amountCents: input.carCents,
-      ref: `inv:${input.invoiceId}:car`,
+      ref: `${input.ref}:car`,
       at: input.paidAt,
       source: 'stripe',
     })
   }
+}
+
+/** Paid subscription invoice (webhook `invoice.paid`). Refs stay `inv:<invoiceId>:rent|car`. */
+export async function recordInvoiceDeposits(input: {
+  tenantId: string
+  invoiceId: string
+  rentCents: number
+  carCents: number
+  paidAt: Date
+}): Promise<void> {
+  await recordPaymentDeposits({
+    tenantId: input.tenantId,
+    ref: `inv:${input.invoiceId}`,
+    rentCents: input.rentCents,
+    carCents: input.carCents,
+    paidAt: input.paidAt,
+  })
 }
 
 export type ProgramBalances = {

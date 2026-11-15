@@ -23,6 +23,14 @@ import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
 import { Button, ButtonLink } from '@/components/elements/button'
 import { Link } from '@/components/elements/link'
+import { BankLinkButton } from '@/components/tenants/bank-link-button'
+import { PaycheckAuthorization } from '@/components/tenants/paycheck-authorization'
+import {
+  paycheckCollectionEnabled,
+  listDeposits,
+  buildAuthorizationText,
+  defaultRangeMaxCents,
+} from '@/lib/paychecks'
 
 export const metadata: Metadata = { title: 'Tenant portal' }
 
@@ -73,6 +81,13 @@ export default async function TenantPortalPage({
   const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
   // Available rent funds (outside-landlord): reserve beyond this month + upgrade readiness.
   const rentReserve = funds && def.outsideLandlord ? await rentFunds(tenant) : null
+  // Per-paycheck collection (feature-flagged; lib/paychecks.ts).
+  const paycheckOn = paycheckCollectionEnabled() && tenant.status === 'approved'
+  const paycheckDeposits = paycheckOn && tenant.bankLink ? await listDeposits(tenant.id, 10) : []
+  const authorizationText =
+    paycheckOn && tenant.bankLink && !tenant.paycheckAuthorization
+      ? buildAuthorizationText(tenant, tenant.bankLink.mask, defaultRangeMaxCents(tenant))
+      : null
   // Homes within budget (rent ≤ 30% of income) for approved tenants not yet in one of our homes.
   const budgetIncome = tenant.employment.verifiedMonthlyIncome ?? tenant.employment.monthlyIncome
   const affordable =
@@ -120,6 +135,86 @@ export default async function TenantPortalPage({
           <p className="text-sm text-red-600 dark:text-red-400">Reason: {tenant.rejectionReason}</p>
         )}
       </Card>
+
+      {/* Paycheck collection — the program % taken from each paycheck (lib/paychecks.ts) */}
+      {paycheckOn && (
+        <Card id="paycheck" className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Paycheck collection</h3>
+            <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">
+              {tenant.paycheck?.status === 'active'
+                ? 'On'
+                : tenant.paycheck?.status === 'paused'
+                  ? 'Paused'
+                  : tenant.bankLink
+                    ? 'Almost ready'
+                    : 'Not set up'}
+            </span>
+          </div>
+          {!tenant.bankLink ? (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  Connect the bank account your paycheck goes into. Each time a paycheck arrives, we collect{' '}
+                  {rateSummary(program)} of it automatically — so you only pay from money you’ve actually earned. It must
+                  be the same account you pay us from.
+                </p>
+              </Text>
+              <BankLinkButton mode="link" />
+            </>
+          ) : tenant.bankLink.status === 'needs_relink' ? (
+            <>
+              <Text className="text-sm/6">
+                <p>Your bank asked you to sign in again. Paycheck collection is paused until you reconnect.</p>
+              </Text>
+              <BankLinkButton mode="relink" />
+            </>
+          ) : authorizationText ? (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  Connected: account ending in {tenant.bankLink.mask ?? '••••'}. One last step — please review and authorize
+                  paycheck collection.
+                </p>
+              </Text>
+              <PaycheckAuthorization text={authorizationText} />
+            </>
+          ) : (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  Watching account ending in {tenant.bankLink.mask ?? '••••'}.{' '}
+                  {tenant.paycheck?.status === 'active'
+                    ? `We collect ${rateSummary(program)} of each paycheck and email you a receipt every time.`
+                    : tenant.paycheck?.status === 'paused'
+                      ? 'Collection is paused — our team will be in touch.'
+                      : 'Authorization saved — our team will switch you over from fixed drafts.'}
+                </p>
+              </Text>
+              {paycheckDeposits.filter((d) => d.collection).length > 0 && (
+                <ul className="text-sm text-olive-700 dark:text-olive-300">
+                  {paycheckDeposits
+                    .filter((d) => d.collection)
+                    .map((d) => (
+                      <li key={d.id}>
+                        {d.date} — paycheck {formatCents(d.amountCents)} → collected {formatCents(d.collection!.chargedCents)}{' '}
+                        <span className="text-olive-600 dark:text-olive-500">({d.status})</span>
+                      </li>
+                    ))}
+                </ul>
+              )}
+            </>
+          )}
+          {tenant.bankLink?.statements?.status === 'needs_consent' && (
+            <div className="flex flex-col gap-2 border-t border-olive-950/10 pt-3 dark:border-white/10">
+              <Text className="text-sm/6">
+                <p>To finish verifying your income, please approve sharing your recent bank statements with our team.</p>
+              </Text>
+              <BankLinkButton mode="statements" />
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Program + money records (lib/programs.ts, lib/program-ledger.ts) */}
       <Card className="flex flex-col gap-3">

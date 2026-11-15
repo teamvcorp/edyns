@@ -13,6 +13,11 @@ import { TenantReviewActions } from '@/components/admin/tenant-review-actions'
 import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
 import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
+import { PaycheckActionForm } from '@/components/admin/paycheck-forms'
+import { decideDepositAction } from '@/app/actions/paychecks'
+import { paycheckCollectionEnabled, listDeposits, monthlyDepositTotals } from '@/lib/paychecks'
+import { listStatementsForTenant } from '@/lib/statements'
+import { summarizeTenantStatements } from '@/lib/statement-reader'
 import { RentAdjustForm } from '@/components/admin/rent-adjust-form'
 import { RentCreditForm } from '@/components/admin/rent-credit-form'
 import { StripeLinkForm } from '@/components/admin/stripe-link-form'
@@ -48,6 +53,7 @@ import {
 import {
   REQUIRED_WEEKLY_HOURS,
   getRentSubscriptionState,
+  getBankAccountLast4,
   getCustomerCreditCents,
   paymentMethodLabel,
 } from '@/lib/stripe'
@@ -172,6 +178,19 @@ export default async function AdminTenantReviewPage({
   const carEligibleDate = funds ? carEligibleOn(funds.firstCarPaymentAt) : null
   const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
   const rentReserve = funds && PROGRAMS[program].outsideLandlord ? await rentFunds(t) : null
+  // Per-paycheck collection + statements (feature-flagged; lib/paychecks.ts, lib/statements.ts).
+  const paycheckOn = paycheckCollectionEnabled()
+  const [deposits, statements, statementSummary, plaidMonthly, stripeBank] =
+    paycheckOn && t.bankLink
+      ? await Promise.all([
+          listDeposits(t.id, 40),
+          listStatementsForTenant(t.id),
+          summarizeTenantStatements(t.id),
+          monthlyDepositTotals(t.id),
+          t.defaultPaymentMethodId ? getBankAccountLast4(t.defaultPaymentMethodId) : Promise.resolve(null),
+        ])
+      : [[], [], null, new Map<string, number>(), null]
+  const accountsMatch = Boolean(stripeBank && t.bankLink?.mask && stripeBank.last4 === t.bankLink.mask)
   // e.g. "visa •••• 4242" — never the full number.
   const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
@@ -758,6 +777,10 @@ export default async function AdminTenantReviewPage({
                   </div>
                 )}
               </>
+            ) : t.paycheck ? (
+              <p className="text-sm text-olive-600 dark:text-olive-500">
+                Collected per paycheck instead of a fixed schedule — see Paycheck collection below.
+              </p>
             ) : !t.employment.verified ? (
               <p className="text-sm text-olive-600 dark:text-olive-500">
                 Waiting on income verification — the tenant must connect their bank via Plaid (or, as a last resort, you
@@ -789,6 +812,193 @@ export default async function AdminTenantReviewPage({
                   program={program}
                   monthlyIncome={t.employment.verifiedMonthlyIncome}
                 />
+              </>
+            )}
+          </Card>
+        )}
+
+        {paycheckOn && t.status === 'approved' && (
+          <Card id="paycheck" className="flex flex-col gap-4">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Paycheck collection</h3>
+            {!t.bankLink ? (
+              <p className="text-sm text-olive-600 dark:text-olive-500">
+                The tenant hasn’t connected their paycheck account yet (they see the prompt in their portal).
+              </p>
+            ) : (
+              <>
+                <dl className="grid gap-4 sm:grid-cols-3">
+                  <Row
+                    label="Bank connection"
+                    value={`${t.bankLink.status}${t.bankLink.statusReason ? ` (${t.bankLink.statusReason})` : ''} · ••${t.bankLink.mask ?? '??'}`}
+                  />
+                  <Row
+                    label="Stripe debit account"
+                    value={
+                      stripeBank
+                        ? `••${stripeBank.last4} ${accountsMatch ? '✓ same account' : '✗ does NOT match'}`
+                        : 'Not a bank account'
+                    }
+                  />
+                  <Row
+                    label="Mode"
+                    value={
+                      t.paycheck
+                        ? `${t.paycheck.status}${t.paycheck.pausedReason ? ` — ${t.paycheck.pausedReason}` : ''}`
+                        : t.billing && t.billing.status !== 'canceled'
+                          ? 'Fixed schedule'
+                          : 'Not started'
+                    }
+                  />
+                  <Row
+                    label="Authorization"
+                    value={
+                      t.paycheckAuthorization
+                        ? `Accepted ${new Date(t.paycheckAuthorization.acceptedAt).toLocaleDateString()} · max ${formatCents(t.paycheckAuthorization.rangeMaxCents)}`
+                        : 'Not yet'
+                    }
+                  />
+                  <Row
+                    label="Collect from"
+                    value={t.paycheck ? new Date(t.paycheck.collectFrom).toLocaleDateString() : '—'}
+                  />
+                  <Row
+                    label="Last sync"
+                    value={t.bankLink.lastSyncedAt ? new Date(t.bankLink.lastSyncedAt).toLocaleString() : '—'}
+                  />
+                </dl>
+                <div className="flex flex-wrap items-start gap-4">
+                  {t.paycheckAuthorization && !t.paycheck && (
+                    <PaycheckActionForm action="switch" tenantId={t.id} label="Switch to paycheck collection" />
+                  )}
+                  {t.paycheck?.status === 'active' && (
+                    <PaycheckActionForm action="pause" tenantId={t.id} label="Pause" soft withReason />
+                  )}
+                  {t.paycheck?.status === 'paused' && (
+                    <PaycheckActionForm action="resume" tenantId={t.id} label="Resume" />
+                  )}
+                  <PaycheckActionForm action="sync" tenantId={t.id} label="Sync now" soft />
+                </div>
+                {deposits.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-left text-sm">
+                      <thead className="text-olive-600 dark:text-olive-500">
+                        <tr>
+                          <th className="py-1 pr-3 font-medium">Date</th>
+                          <th className="py-1 pr-3 font-medium">Deposit</th>
+                          <th className="py-1 pr-3 font-medium">From</th>
+                          <th className="py-1 pr-3 font-medium">Status</th>
+                          <th className="py-1 font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-olive-950 dark:text-white">
+                        {deposits
+                          .filter((d) => d.status !== 'history')
+                          .map((d) => (
+                            <tr key={d.id} className="border-t border-olive-950/10 dark:border-white/10">
+                              <td className="py-1 pr-3">{d.date}</td>
+                              <td className="py-1 pr-3">{formatCents(d.amountCents)}</td>
+                              <td className="py-1 pr-3">{d.payer ?? '—'}</td>
+                              <td className="py-1 pr-3">
+                                {d.status} <span className="text-olive-600 dark:text-olive-500">({d.reason.replace(/_/g, ' ')})</span>
+                                {d.collection?.chargedCents ? ` · ${formatCents(d.collection.chargedCents)}` : ''}
+                                {d.collection?.failureCode ? ` · ${d.collection.failureCode}` : ''}
+                              </td>
+                              <td className="py-1">
+                                {(d.status === 'review' || d.status === 'failed' || d.status === 'queued') && (
+                                  <div className="flex gap-2">
+                                    {d.status !== 'queued' && (
+                                      <form action={decideDepositAction}>
+                                        <input type="hidden" name="depositId" value={d.id} />
+                                        <input type="hidden" name="decision" value="include" />
+                                        <SoftButton type="submit">{d.status === 'failed' ? 'Retry' : 'Include'}</SoftButton>
+                                      </form>
+                                    )}
+                                    <form action={decideDepositAction}>
+                                      <input type="hidden" name="depositId" value={d.id} />
+                                      <input type="hidden" name="decision" value="ignore" />
+                                      <SoftButton type="submit" className="text-red-600 dark:text-red-400">
+                                        Ignore
+                                      </SoftButton>
+                                    </form>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Bank statements — income fallback when payroll can't be found (Phase 7 / 7b) */}
+                <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                  <h4 className="font-semibold text-olive-950 dark:text-white">Bank statements (income review)</h4>
+                  <p className="text-sm text-olive-600 dark:text-olive-500">
+                    For tenants whose payroll can’t be found. Status: {t.bankLink.statements?.status ?? 'not requested'}.
+                    Statements are stored encrypted and deleted automatically after 180 days.
+                  </p>
+                  <div className="flex flex-wrap items-start gap-4">
+                    <PaycheckActionForm action="fetchStatements" tenantId={t.id} label="Fetch statements" soft />
+                    {statements.length > 0 && (
+                      <PaycheckActionForm action="analyze" tenantId={t.id} label="Read with AI" soft withForce />
+                    )}
+                  </div>
+                  {statements.length > 0 && (
+                    <ul className="text-sm text-olive-700 dark:text-olive-300">
+                      {statements.map((st) => (
+                        <li key={st.id}>
+                          <Link href={`/admin/tenants/${t.id}/statements/${st.id}`} target="_blank" rel="noopener">
+                            {st.year}-{String(st.month).padStart(2, '0')} statement
+                          </Link>{' '}
+                          ··{st.accountMask ?? '??'} {st.analyzedAt ? '· read by AI' : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {statementSummary && statementSummary.months.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <dl className="grid gap-4 sm:grid-cols-2">
+                        <Row label="Avg monthly deposits (excl. own transfers)" value={formatCents(statementSummary.avgMonthlyDepositsCents)} />
+                        <Row label="Avg monthly pay" value={formatCents(statementSummary.avgMonthlyPayCents)} />
+                      </dl>
+                      <table className="w-full text-left text-sm">
+                        <thead className="text-olive-600 dark:text-olive-500">
+                          <tr>
+                            <th className="py-1 pr-3 font-medium">Month</th>
+                            <th className="py-1 pr-3 font-medium">Deposits (AI lines)</th>
+                            <th className="py-1 pr-3 font-medium">Pay</th>
+                            <th className="py-1 pr-3 font-medium">Plaid saw</th>
+                            <th className="py-1 font-medium">Check</th>
+                          </tr>
+                        </thead>
+                        <tbody className="text-olive-950 dark:text-white">
+                          {statementSummary.months.map((m) => {
+                            const plaid = plaidMonthly.get(m.label)
+                            const off = plaid != null && Math.abs(plaid - m.totalDepositsCents) > Math.max(5000, plaid * 0.1)
+                            return (
+                              <tr key={m.statementId} className="border-t border-olive-950/10 dark:border-white/10">
+                                <td className="py-1 pr-3">{m.label}</td>
+                                <td className="py-1 pr-3">{formatCents(m.totalDepositsCents)}</td>
+                                <td className="py-1 pr-3">{formatCents(m.payDepositsCents)}</td>
+                                <td className="py-1 pr-3">{plaid != null ? formatCents(plaid) : '—'}</td>
+                                <td className="py-1">
+                                  {off ? '⚠️ differs' : 'ok'}
+                                  {m.lowConfidenceLines ? ` · ${m.lowConfidenceLines} unsure line(s)` : ''}
+                                  {m.notes ? ` · ${m.notes}` : ''}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                      <p className="text-xs text-olive-600 dark:text-olive-500">
+                        Totals are added up by the app from the lines the AI read — open each statement to confirm. Then
+                        record the verified monthly income with the income form above. The AI doesn’t approve or set
+                        amounts.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </>
             )}
           </Card>

@@ -10,22 +10,19 @@ import {
   type Tenant,
 } from '@/lib/tenants'
 import { PROGRAMS, programOf } from '@/lib/programs'
-import { recordInvoiceDeposits, recordLedgerEntry } from '@/lib/program-ledger'
-import { getPropertyById } from '@/lib/properties'
-import { recordRentEquity } from '@/lib/equity'
+import { recordLedgerEntry } from '@/lib/program-ledger'
+import { recordTenantPayment } from '@/lib/tenant-payments'
+import {
+  markCollectionProcessing,
+  markCollectionSucceeded,
+  markCollectionFailed,
+  handleCollectionDispute,
+} from '@/lib/paychecks'
 import { recordInvoicePayment, type PaymentPhase } from '@/lib/invoices'
 import { markPayoutPaid, createPaidPayout, markPayoutReversedByTransfer } from '@/lib/payouts'
 import { findPartnerByStripeAccountId } from '@/lib/users'
 import { logError, logWarn } from '@/lib/log'
 
-/** Default partner equity share when a property hasn't set one. */
-const DEFAULT_EQUITY_SHARE_PERCENT = 10
-
-/**
- * Credit the partner's rent-equity ledger for a paid rent invoice: an admin-set
- * percentage of the base rent (per property) becomes partner equity. Best-effort
- * and idempotent (keyed on the invoice id) — never blocks the webhook response.
- */
 /**
  * A rent invoice that should create money records: actually paid, non-zero.
  * Credit-covered invoices count (amount_paid 0 but total > 0) — a credit stands
@@ -42,19 +39,25 @@ function invoicePaidAt(invoice: Stripe.Invoice): Date {
 }
 
 /**
- * Outside-landlord / car-program tenants: split the paid invoice into the rent and
- * car buckets of the program ledger (lib/program-ledger.ts). The split comes
- * from the invoice's Stripe price (terms live when it was billed); the tenant's
- * current record is only a fallback. Idempotent per invoice id. Throws on
- * failure so the webhook returns 500 and Stripe retries — this is a money
- * record, unlike best-effort partner equity.
+ * Base rent/car amounts a paid subscription invoice represents.
+ * - Effort Exchange: the whole base is rent (equity accrues on it). The Stripe
+ *   processing gross-up the tenant covers stays with the platform; fall back to
+ *   the invoice total if no base is recorded (shouldn't happen).
+ * - Other programs: the split stamped on the invoice's Stripe PRICE (terms live
+ *   when it was billed), else the tenant's current split, else the program's
+ *   only bucket.
  */
-async function recordProgramDepositsForInvoice(invoice: Stripe.Invoice & { id: string }, tenant: Tenant): Promise<void> {
+async function invoiceAmounts(
+  invoice: Stripe.Invoice & { id: string },
+  tenant: Tenant,
+): Promise<{ rentCents: number; carCents: number }> {
   const program = programOf(tenant)
+  if (PROGRAMS[program].managedHousing) {
+    return { rentCents: tenant.billing?.baseAmountCents ?? invoice.total, carCents: 0 }
+  }
   let split = await invoiceRentSplit(invoice)
   if (!split && tenant.billing?.split) split = { ...tenant.billing.split }
   if (!split) {
-    // No split anywhere (e.g. legacy/imported price): assign the whole base to the program's only bucket.
     const base = tenant.billing?.baseAmountCents ?? invoice.total
     logWarn('stripe/webhook/program-split', 'invoice had no split metadata; using program default', {
       tenantId: tenant.id,
@@ -62,44 +65,7 @@ async function recordProgramDepositsForInvoice(invoice: Stripe.Invoice & { id: s
     })
     split = PROGRAMS[program].rentRate > 0 ? { rentCents: base, carCents: 0 } : { rentCents: 0, carCents: base }
   }
-  await recordInvoiceDeposits({
-    tenantId: tenant.id,
-    invoiceId: invoice.id,
-    rentCents: split.rentCents,
-    carCents: split.carCents,
-    paidAt: invoicePaidAt(invoice),
-  })
-}
-
-async function recordRentEquityForInvoice(invoice: Stripe.Invoice & { id: string }, tenant: Tenant): Promise<void> {
-  // Partner equity only exists for homes we manage (Effort Exchange).
-  if (!PROGRAMS[programOf(tenant)].managedHousing) return
-  if (!tenant.currentPropertyId) return
-
-  const property = await getPropertyById(tenant.currentPropertyId)
-  if (!property) return
-
-  // Equity accrues on the base rent the platform keeps — the Stripe processing-fee
-  // gross-up that the tenant covers stays with the platform. Fall back to the
-  // invoice total (not amount_paid, which is 0 when a credit covered it) if no
-  // base is recorded (shouldn't happen for a subscription invoice).
-  const rentCents = tenant.billing?.baseAmountCents ?? invoice.total
-
-  const sharePercent = property.equitySharePercent ?? DEFAULT_EQUITY_SHARE_PERCENT
-  if (sharePercent <= 0) return
-  const equityCents = Math.round((rentCents * sharePercent) / 100)
-  if (equityCents <= 0) return
-
-  await recordRentEquity({
-    partnerId: property.partnerId,
-    propertyId: property.id,
-    tenantId: tenant.id,
-    stripeInvoiceId: invoice.id,
-    rentCents,
-    sharePercent,
-    equityCents,
-    paidAt: invoicePaidAt(invoice),
-  })
+  return { rentCents: split.rentCents, carCents: split.carCents }
 }
 
 /** Map a Stripe subscription status to our billing status. */
@@ -203,22 +169,51 @@ export async function POST(request: Request): Promise<Response> {
       await setBillingStatusBySubscription(subId, 'active')
       const tenant = isPaidRentInvoice(invoice) ? await getTenantBySubscriptionId(subId) : null
       if (tenant && isPaidRentInvoice(invoice)) {
-        if (PROGRAMS[programOf(tenant)].managedHousing) {
-          try {
-            await recordRentEquityForInvoice(invoice, tenant)
-          } catch (err) {
-            logError('stripe/webhook/rent-equity', err, { invoiceId: invoice.id })
-            /* equity crediting is best-effort — never fail the webhook over it */
-          }
-        } else {
-          try {
-            await recordProgramDepositsForInvoice(invoice, tenant)
-          } catch (err) {
-            logError('stripe/webhook/program-ledger', err, { invoiceId: invoice.id, tenantId: tenant.id })
-            return new Response('Ledger write failed', { status: 500 }) // Stripe retries; writes are idempotent
-          }
+        const managed = PROGRAMS[programOf(tenant)].managedHousing
+        try {
+          await recordTenantPayment({
+            tenant,
+            ref: `inv:${invoice.id}`,
+            ...(await invoiceAmounts(invoice, tenant)),
+            paidAt: invoicePaidAt(invoice),
+          })
+        } catch (err) {
+          logError(managed ? 'stripe/webhook/rent-equity' : 'stripe/webhook/program-ledger', err, {
+            invoiceId: invoice.id,
+            tenantId: tenant.id,
+          })
+          // Partner equity is best-effort; the program ledger is a money record →
+          // 500 so Stripe retries (writes are idempotent).
+          if (!managed) return new Response('Ledger write failed', { status: 500 })
         }
       }
+    }
+  } else if (
+    event.type === 'payment_intent.processing' ||
+    event.type === 'payment_intent.succeeded' ||
+    event.type === 'payment_intent.payment_failed'
+  ) {
+    // Per-paycheck collections (lib/paychecks.ts). Other PaymentIntents (Checkout
+    // fees, invoices) are handled by their own events above and ignored here.
+    const pi = event.data.object as Stripe.PaymentIntent
+    if (pi.metadata?.type === 'paycheck_collection') {
+      try {
+        if (event.type === 'payment_intent.processing') await markCollectionProcessing(pi)
+        else if (event.type === 'payment_intent.succeeded') await markCollectionSucceeded(pi)
+        else await markCollectionFailed(pi)
+      } catch (err) {
+        logError('stripe/webhook/paycheck', err, { paymentIntentId: pi.id })
+        return new Response('Paycheck update failed', { status: 500 }) // idempotent; Stripe retries
+      }
+    }
+  } else if (event.type === 'charge.dispute.created') {
+    // A disputed bank debit invalidates the ACH mandate: stop paycheck collection.
+    const dispute = event.data.object as Stripe.Dispute
+    try {
+      await handleCollectionDispute(dispute)
+    } catch (err) {
+      logError('stripe/webhook/dispute', err, { disputeId: dispute.id })
+      return new Response('Dispute handling failed', { status: 500 })
     }
   } else if (event.type === 'invoice.payment_failed') {
     const subId = invoiceSubscriptionId(event.data.object as Stripe.Invoice)

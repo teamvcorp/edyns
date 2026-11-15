@@ -587,3 +587,53 @@ export async function resumeRentSubscription(subscriptionId: string): Promise<bo
     return false
   }
 }
+
+// ---- Per-paycheck collection (docs/plans/paycheck-collection.md) ------------
+// Reference: docs/vendor/stripe-ach-variable-debits.md.
+
+/**
+ * The saved payment method's bank details, used to enforce "debit the SAME
+ * account the paycheck lands in" (Stripe last4 must equal the Plaid mask).
+ * Null when it isn't a US bank account or Stripe is unreachable.
+ */
+export async function getBankAccountLast4(paymentMethodId: string): Promise<{ last4: string; bankName?: string } | null> {
+  try {
+    const pm = await getStripe().paymentMethods.retrieve(paymentMethodId)
+    if (pm.type !== 'us_bank_account' || !pm.us_bank_account?.last4) return null
+    return { last4: pm.us_bank_account.last4, bankName: pm.us_bank_account.bank_name ?? undefined }
+  } catch (err) {
+    logError('stripe/bank-last4', err)
+    return null
+  }
+}
+
+/**
+ * One off-session ACH debit for a detected paycheck. Pins `us_bank_account`
+ * (never a card) and uses an idempotency key derived from the Plaid transaction
+ * + attempt, so a webhook retry or double click can't debit twice. ACH is
+ * asynchronous: the result arrives later as payment_intent.processing /
+ * .succeeded / .payment_failed, routed by `metadata.type`.
+ */
+export async function createPaycheckPaymentIntent(input: {
+  customerId: string
+  paymentMethodId: string
+  amountCents: number
+  metadata: Record<string, string>
+  idempotencyKey: string
+}): Promise<{ id: string; status: Stripe.PaymentIntent.Status }> {
+  const pi = await getStripe().paymentIntents.create(
+    {
+      amount: input.amountCents,
+      currency: 'usd',
+      customer: input.customerId,
+      payment_method: input.paymentMethodId,
+      payment_method_types: ['us_bank_account'],
+      off_session: true,
+      confirm: true,
+      description: 'edynsgate paycheck collection',
+      metadata: input.metadata,
+    },
+    { idempotencyKey: input.idempotencyKey },
+  )
+  return { id: pi.id, status: pi.status }
+}

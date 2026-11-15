@@ -7,6 +7,9 @@ import {
   Products,
   CountryCode,
   IncomeVerificationSourceType,
+  type Transaction,
+  type RemovedTransaction,
+  type StatementsListResponse,
 } from 'plaid'
 import { decodeProtectedHeader, importJWK, jwtVerify, type JWK } from 'jose'
 import { createHash, timingSafeEqual } from 'node:crypto'
@@ -153,6 +156,117 @@ export async function getPayrollIncome(
     logError('plaid/payroll-income', err)
     return { monthlyIncome: null, weeklyHours: null, lastPayDate: null }
   }
+}
+
+// ---- Bank link for per-paycheck collection (Transactions + Statements) ----
+// Reference: docs/vendor/plaid-transactions.md, docs/vendor/plaid-statements.md.
+
+/** Months of statements we may request for an income review (Plaid bills Statements by months). */
+const STATEMENT_MONTHS = 3
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Link token to connect the bank account a tenant's paycheck lands in.
+ * - `transactions`: watch for paycheck deposits.
+ * - `statements` in additional_consented_products: consent is collected now but
+ *   Plaid doesn't bill until we actually call Statements (income fallback only).
+ * Pass `accessToken` for UPDATE MODE (re-link a broken connection, or add
+ * statements consent to an existing Item).
+ */
+export async function createBankLinkToken(
+  clientUserId: string,
+  opts: { accessToken?: string; statementsOnly?: boolean } = {},
+): Promise<string> {
+  const redirectUri = process.env.PLAID_REDIRECT_URI
+  const webhook = process.env.PLAID_WEBHOOK_URL
+  const end = new Date()
+  const start = new Date(end)
+  start.setMonth(start.getMonth() - STATEMENT_MONTHS)
+  const res = await getPlaid().linkTokenCreate({
+    user: { client_user_id: clientUserId },
+    client_name: 'edynsgate',
+    country_codes: [CountryCode.Us],
+    language: 'en',
+    ...(redirectUri ? { redirect_uri: redirectUri } : {}),
+    ...(webhook?.startsWith('https://') ? { webhook } : {}),
+    ...(opts.accessToken
+      ? // Update mode: products only when adding a product (statements) to the Item.
+        { access_token: opts.accessToken, ...(opts.statementsOnly ? { products: [Products.Statements] } : {}) }
+      : {
+          products: [Products.Transactions],
+          additional_consented_products: [Products.Statements],
+          transactions: { days_requested: 90 },
+        }),
+    statements: { start_date: isoDate(start), end_date: isoDate(end) },
+  })
+  return res.data.link_token
+}
+
+/**
+ * Pull every change since `cursor` from /transactions/sync, following has_more.
+ * If Plaid reports the data changed mid-run, restart from the ORIGINAL cursor
+ * (Plaid's documented recovery). The caller saves `nextCursor` only after it has
+ * processed everything returned.
+ */
+export async function syncAllTransactions(
+  accessToken: string,
+  cursor: string | undefined,
+): Promise<{ added: Transaction[]; modified: Transaction[]; removed: RemovedTransaction[]; nextCursor: string }> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const added: Transaction[] = []
+    const modified: Transaction[] = []
+    const removed: RemovedTransaction[] = []
+    let next = cursor
+    try {
+      for (let page = 0; page < 50; page++) {
+        const res = await getPlaid().transactionsSync({ access_token: accessToken, cursor: next, count: 500 })
+        added.push(...res.data.added)
+        modified.push(...res.data.modified)
+        removed.push(...res.data.removed)
+        next = res.data.next_cursor
+        if (!res.data.has_more) return { added, modified, removed, nextCursor: next }
+      }
+      throw new Error('transactions/sync: too many pages')
+    } catch (err) {
+      const code = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
+      if (code === 'TRANSACTIONS_SYNC_MUTATION_DURING_PAGINATION') continue // restart from original cursor
+      throw err
+    }
+  }
+  throw new Error('transactions/sync: data kept changing during pagination')
+}
+
+export async function listStatements(accessToken: string): Promise<StatementsListResponse> {
+  const res = await getPlaid().statementsList({ access_token: accessToken })
+  return res.data
+}
+
+/** Download one statement PDF as raw bytes (validated + encrypted by the caller). */
+export async function downloadStatement(accessToken: string, statementId: string): Promise<Buffer> {
+  const res = await getPlaid().statementsDownload(
+    { access_token: accessToken, statement_id: statementId },
+    { responseType: 'arraybuffer' },
+  )
+  return Buffer.from(res.data as ArrayBuffer)
+}
+
+/** One account on an Item (mask/type/name) — to confirm the chosen paycheck account. */
+export async function getItemAccount(
+  accessToken: string,
+  accountId: string,
+): Promise<{ mask?: string; type: string; subtype?: string; name: string } | null> {
+  const res = await getPlaid().accountsGet({ access_token: accessToken, options: { account_ids: [accountId] } })
+  const acct = res.data.accounts.find((a) => a.account_id === accountId)
+  if (!acct) return null
+  return { mask: acct.mask ?? undefined, type: String(acct.type), subtype: acct.subtype ? String(acct.subtype) : undefined, name: acct.name }
+}
+
+/** Plaid error code from an Axios error, if any (for branching — never log the raw error). */
+export function plaidErrorCode(err: unknown): string | undefined {
+  return (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code
 }
 
 export async function exchangePublicToken(publicToken: string): Promise<{ accessToken: string; itemId: string }> {
