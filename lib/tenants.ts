@@ -4,7 +4,7 @@ import { ObjectId, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 import { deletePaystubFile } from './paystubs'
 import type { Address } from './users'
-import type { ProgramId } from './programs'
+import { PROGRAMS, OUTSIDE_LANDLORD_PROGRAMS, type ProgramId } from './programs'
 
 export interface Person {
   name: string
@@ -66,7 +66,7 @@ export interface Billing {
    */
   pause?: { at: Date; source: 'admin' | 'income_check'; reason?: string; resumesAt?: Date }
   /**
-   * How `baseAmountCents` divides between rent and car savings (programs with a
+   * How `baseAmountCents` divides between rent and the car program (programs with a
    * car component). Absent for Effort Exchange / imported billing = all rent.
    * The same split is stamped on the Stripe price metadata, which the webhook
    * reads so past invoices are never re-split by a later change.
@@ -75,7 +75,7 @@ export interface Billing {
 }
 
 /**
- * The outside landlord we forward rent to (own_landlord program). The rental
+ * The outside landlord we forward rent to (own_landlord / own_landlord_car). The rental
  * address is the tenant's `address` — they live in the home they're renting.
  */
 export interface Landlord {
@@ -145,11 +145,11 @@ export interface TenantDoc {
   employment: Employment
   /** Which program they enrolled in (lib/programs.ts). Absent on legacy records = 'effort_exchange'; read via programOf(). */
   program?: ProgramId
-  /** own_landlord only: who we pay rent to. */
+  /** Outside-landlord programs only: who we pay rent to. */
   landlord?: Landlord
-  /** own_landlord only: lease metadata; the encrypted file lives in `leases` (lib/leases.ts). */
+  /** Outside-landlord programs only: lease metadata; the encrypted file lives in `leases` (lib/leases.ts). */
   lease?: { uploadedAt: Date; contentType: string }
-  /** own_landlord only: the latest monthly rent shortfall notice. */
+  /** Outside-landlord programs only: the latest monthly rent shortfall notice. */
   shortfall?: ShortfallNotice
   status: ApplicationStatus
   rejectionReason?: string
@@ -279,7 +279,7 @@ export async function createTenantApplication(
     employment: input.employment,
     program: input.program,
     // Only programs that forward rent carry landlord details (never trust the caller to omit them).
-    landlord: input.program === 'own_landlord' ? input.landlord : undefined,
+    landlord: PROGRAMS[input.program].outsideLandlord ? input.landlord : undefined,
     status: 'pending',
     fee: { status: 'unpaid', amountCents: input.feeAmountCents },
     interestedPropertyId:
@@ -299,7 +299,11 @@ export async function createTenantApplication(
 export async function listTenantsForShortfallCheck(): Promise<Tenant[]> {
   const col = await tenantsCollection()
   const docs = await col
-    .find({ status: 'approved', program: 'own_landlord', 'billing.status': { $in: ['active', 'past_due', 'paused'] } })
+    .find({
+      status: 'approved',
+      program: { $in: [...OUTSIDE_LANDLORD_PROGRAMS] },
+      'billing.status': { $in: ['active', 'past_due', 'paused'] },
+    })
     .toArray()
   return docs.map(toTenant)
 }

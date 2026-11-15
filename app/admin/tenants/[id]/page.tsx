@@ -19,9 +19,8 @@ import { StripeLinkForm } from '@/components/admin/stripe-link-form'
 import { RentPauseForm } from '@/components/admin/rent-pause-form'
 import { LandlordPaymentForm, LedgerAdjustmentForm } from '@/components/admin/program-funds-forms'
 import { balancesFor, listLedger } from '@/lib/program-ledger'
-import { listCarOffers } from '@/lib/car-offers'
-import { CarOfferForm, MarkCarPurchasedForm } from '@/components/admin/car-offer-forms'
-import { withdrawCarOfferAction } from '@/app/actions/car-offers'
+import { listCarAssignments } from '@/lib/car-assignments'
+import { AssignCarForm, ReturnCarForm } from '@/components/admin/car-assignment-forms'
 import { randomUUID } from 'node:crypto'
 import {
   resumeTenantBillingAction,
@@ -34,7 +33,16 @@ import {
 } from '@/app/actions/admin'
 import { Button, SoftButton } from '@/components/elements/button'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
-import { PROGRAMS, programOf, rateSummary, pct, rentExceedsAffordable } from '@/lib/programs'
+import {
+  PROGRAMS,
+  programOf,
+  rateSummary,
+  pct,
+  rentExceedsAffordable,
+  carEligibleOn,
+  carTrustComplete,
+  CAR_TRUST_MONTHS,
+} from '@/lib/programs'
 import {
   REQUIRED_WEEKLY_HOURS,
   getRentSubscriptionState,
@@ -54,10 +62,9 @@ const creditMethodLabel = {
   other: 'Other',
 } as const
 const ledgerKindLabel = {
-  deposit: 'Draft',
+  deposit: 'Payment',
   shortfall_payment: 'Shortfall payment',
   landlord_payment: 'Paid to landlord',
-  car_release: 'Released for car',
   adjustment: 'Adjustment',
 } as const
 const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: 'monthly' } as const
@@ -153,12 +160,15 @@ export default async function AdminTenantReviewPage({
       ])
     : [null, null]
   const nextDraftAt = liveRent?.nextDraftAt ?? t.billing?.nextDraftAt ?? t.billing?.firstDraftAt
-  // Program funds (own_landlord / car_only): balances + recent ledger entries.
+  // Program ledger (non-Effort-Exchange programs): rent held for landlords + car-program payments.
   const holdsFunds = !PROGRAMS[program].managedHousing
-  const [funds, ledger, carOffers] = holdsFunds
-    ? await Promise.all([balancesFor(t.id), listLedger(t.id, 25), listCarOffers(t.id)])
+  const [funds, ledger, cars] = holdsFunds
+    ? await Promise.all([balancesFor(t.id), listLedger(t.id, 25), listCarAssignments(t.id)])
     : [null, [], []]
-  const openOffer = carOffers.find((o) => o.status === 'offered' || o.status === 'accepted')
+  const activeCar = cars.find((c) => c.status === 'active')
+  // Car trust period: CAR_TRUST_MONTHS from the first car payment (lib/programs.ts).
+  const carEligibleDate = funds ? carEligibleOn(funds.firstCarPaymentAt) : null
+  const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
   // e.g. "visa •••• 4242" — never the full number.
   const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
@@ -582,7 +592,7 @@ export default async function AdminTenantReviewPage({
                   {t.billing.split && (
                     <Row
                       label="Split"
-                      value={`${formatCents(t.billing.split.rentCents)} rent + ${formatCents(t.billing.split.carCents)} car savings`}
+                      value={`${formatCents(t.billing.split.rentCents)} rent + ${formatCents(t.billing.split.carCents)} car program`}
                     />
                   )}
                   <Row label="Status" value={t.billing.status} />
@@ -783,7 +793,7 @@ export default async function AdminTenantReviewPage({
 
         {funds && (
           <Card className="flex flex-col gap-4">
-            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Program funds held</h3>
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Program money</h3>
             <dl className="grid gap-4 sm:grid-cols-3">
               {PROGRAMS[program].outsideLandlord && (
                 <>
@@ -794,9 +804,24 @@ export default async function AdminTenantReviewPage({
               )}
               {PROGRAMS[program].carRate > 0 && (
                 <>
-                  <Row label="Car savings" value={formatCents(funds.carSavingsCents)} />
-                  <Row label="Car deposits (all time)" value={formatCents(funds.carDepositedCents)} />
-                  <Row label="Released for a car" value={formatCents(funds.carReleasedCents)} />
+                  <Row
+                    label="Car payments (kept by edynsgate)"
+                    value={`${funds.carPaymentCount} · ${formatCents(funds.carPaidCents)}`}
+                  />
+                  <Row
+                    label="First car payment"
+                    value={funds.firstCarPaymentAt ? new Date(funds.firstCarPaymentAt).toLocaleDateString() : '—'}
+                  />
+                  <Row
+                    label={`Trust period (${CAR_TRUST_MONTHS} months)`}
+                    value={
+                      carEligibleDate
+                        ? carTrusted
+                          ? 'Complete'
+                          : `Ends ${carEligibleDate.toLocaleDateString()}`
+                        : 'Not started'
+                    }
+                  />
                 </>
               )}
             </dl>
@@ -829,42 +854,49 @@ export default async function AdminTenantReviewPage({
             )}
 
             {PROGRAMS[program].carRate > 0 && (
-              <div id="car-offer" className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
-                <h4 className="font-semibold text-olive-950 dark:text-white">Car offer</h4>
-                {openOffer ? (
+              <div id="car" className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                <h4 className="font-semibold text-olive-950 dark:text-white">Car</h4>
+                {activeCar ? (
                   <div className="flex flex-col gap-3">
                     <p className="text-sm text-olive-950 dark:text-white">
-                      <strong>{openOffer.vehicle}</strong> — {formatCents(openOffer.priceCents)} ·{' '}
-                      {openOffer.status === 'accepted' ? 'Accepted by tenant' : 'Waiting for tenant'} (offered{' '}
-                      {new Date(openOffer.createdAt).toLocaleDateString()})
+                      <strong>{activeCar.vehicle}</strong>
+                      {activeCar.plate ? ` · plate ${activeCar.plate}` : ''}
+                      {activeCar.vin ? ` · VIN ${activeCar.vin}` : ''} — assigned{' '}
+                      {new Date(activeCar.assignedAt).toLocaleDateString()}
+                      {activeCar.early ? ' (early, before trust period)' : ''}
                     </p>
-                    {openOffer.status === 'accepted' && <MarkCarPurchasedForm offerId={openOffer.id} />}
-                    <form action={withdrawCarOfferAction}>
-                      <input type="hidden" name="offerId" value={openOffer.id} />
-                      <SoftButton type="submit" className="text-red-600 dark:text-red-400">
-                        Withdraw offer
-                      </SoftButton>
-                    </form>
+                    {activeCar.insurance && (
+                      <p className="text-sm text-olive-600 dark:text-olive-500">
+                        Insurance (paid by edynsgate): {activeCar.insurance}
+                      </p>
+                    )}
+                    <p className="text-sm text-olive-600 dark:text-olive-500">
+                      edynsgate owns this car. If the tenant stops paying or leaves the program, collect the car and
+                      mark it returned.
+                    </p>
+                    <ReturnCarForm assignmentId={activeCar.id} />
                   </div>
-                ) : funds.carSavingsCents > 0 ? (
+                ) : (
                   <>
                     <p className="text-sm text-olive-600 dark:text-olive-500">
-                      Offer an available car priced at or below their savings ({formatCents(funds.carSavingsCents)}).
-                      The tenant accepts or declines in their portal.
+                      {carTrusted
+                        ? 'Trust period complete — assign a car edynsgate owns. Edynsgate pays its insurance.'
+                        : `Cars are provided after ${CAR_TRUST_MONTHS} months of car payments${
+                            carEligibleDate ? ` (${carEligibleDate.toLocaleDateString()})` : ''
+                          }. You can provide one early if you trust the tenant.`}
                     </p>
-                    <CarOfferForm tenantId={t.id} maxDollars={funds.carSavingsCents / 100} />
+                    <AssignCarForm tenantId={t.id} trusted={carTrusted} />
                   </>
-                ) : (
-                  <p className="text-sm text-olive-600 dark:text-olive-500">No car savings yet.</p>
                 )}
-                {carOffers.filter((o) => o.id !== openOffer?.id).length > 0 && (
+                {cars.filter((c) => c.status === 'returned').length > 0 && (
                   <ul className="text-sm text-olive-700 dark:text-olive-300">
-                    {carOffers
-                      .filter((o) => o.id !== openOffer?.id)
-                      .map((o) => (
-                        <li key={o.id}>
-                          {new Date(o.createdAt).toLocaleDateString()} — {o.vehicle}, {formatCents(o.priceCents)} ·{' '}
-                          {o.status}
+                    {cars
+                      .filter((c) => c.status === 'returned')
+                      .map((c) => (
+                        <li key={c.id}>
+                          {new Date(c.assignedAt).toLocaleDateString()} to{' '}
+                          {c.returnedAt ? new Date(c.returnedAt).toLocaleDateString() : ''} — {c.vehicle} · returned
+                          {c.returnReason ? ` (${c.returnReason})` : ''}
                         </li>
                       ))}
                   </ul>
@@ -872,17 +904,12 @@ export default async function AdminTenantReviewPage({
               </div>
             )}
 
-            <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
-              <h4 className="font-semibold text-olive-950 dark:text-white">Adjustment</h4>
-              <LedgerAdjustmentForm
-                tenantId={t.id}
-                nonce={randomUUID()}
-                buckets={[
-                  ...(PROGRAMS[program].outsideLandlord ? (['rent'] as const) : []),
-                  ...(PROGRAMS[program].carRate > 0 ? (['car'] as const) : []),
-                ]}
-              />
-            </div>
+            {PROGRAMS[program].outsideLandlord && (
+              <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
+                <h4 className="font-semibold text-olive-950 dark:text-white">Adjust rent on hand</h4>
+                <LedgerAdjustmentForm tenantId={t.id} nonce={randomUUID()} />
+              </div>
+            )}
 
             {ledger.length > 0 && (
               <div className="flex flex-col gap-1 border-t border-olive-950/10 pt-4 dark:border-white/10">

@@ -4,7 +4,8 @@ import { Text } from '@/components/elements/text'
 import { ButtonLink } from '@/components/elements/button'
 import { HomeIcon } from '@/components/icons/home-icon'
 import { KeyIcon } from '@/components/icons/key-icon'
-import { BanknotesIcon } from '@/components/icons/banknotes-icon'
+import { MapIcon } from '@/components/icons/map-icon'
+import { CompassIcon } from '@/components/icons/compass-icon'
 import { PROGRAMS, PROGRAM_IDS, rateSummary, type ProgramId } from '@/lib/programs'
 
 // Card icon per program. A full Record, so adding a program in lib/programs.ts
@@ -12,7 +13,8 @@ import { PROGRAMS, PROGRAM_IDS, rateSummary, type ProgramId } from '@/lib/progra
 const programIcons: Record<ProgramId, ComponentType<ComponentProps<'svg'>>> = {
   effort_exchange: HomeIcon,
   own_landlord: KeyIcon,
-  car_only: BanknotesIcon,
+  own_landlord_car: CompassIcon,
+  car_only: MapIcon,
 }
 
 /**
@@ -23,7 +25,7 @@ const programIcons: Record<ProgramId, ComponentType<ComponentProps<'svg'>>> = {
 export function ProgramCards({ headingLevel = 'h3' }: { headingLevel?: 'h2' | 'h3' }) {
   const H = headingLevel
   return (
-    <div className="grid gap-6 lg:grid-cols-3">
+    <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
       {PROGRAM_IDS.map((id) => {
         const p = PROGRAMS[id]
         const Icon = programIcons[id]

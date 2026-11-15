@@ -201,11 +201,12 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 ## Business rules (do not get these wrong)
 
 - **Eligibility = effort, never income.** Tenant approval is based **only** on the 35-hr/week effort commitment (every program). Income is **never** an approval criterion — Plaid income data is used solely to set the collection amount.
-- **Three tenant programs, one source of rates: `lib/programs.ts`** (never hard-code a percentage):
-  - **Effort Exchange** — 40% of pay as rent for a home we manage; partner equity accrues.
-  - **Your Home + Car** (`own_landlord`) — 30% rent (staff pay the tenant's outside landlord manually and record it) + 10% car savings. Applicant gives landlord details + uploads a lease (encrypted, `lib/leases.ts`). Rent over 30% of income is **warned, never blocked**.
-  - **Car Savings** (`car_only`) — 10% car savings, released only toward an admin-approved car offer (`lib/car-offers.ts`).
-  - Program money is tracked in the append-only **program ledger** (`lib/program-ledger.ts`) — it is **not revenue** and never earns partner equity. Landlord payments can't exceed rent on hand.
+- **Four tenant programs, one source of rates: `lib/programs.ts`** (never hard-code a percentage; check program flags, not ids). Housing and the car program, alone or combined:
+  - **Effort Exchange** (`effort_exchange`) — 40% of pay as rent for a home we manage; partner equity accrues.
+  - **Your Home** (`own_landlord`) — 30% rent; staff pay the tenant's outside landlord manually and record it. Applicant gives landlord details + uploads a lease (encrypted, `lib/leases.ts`). Rent over 30% of income is **warned, never blocked**.
+  - **Your Home + Car** (`own_landlord_car`) — the above + the car program.
+  - **Car Program** (`car_only`) — 10% of pay, **kept by edynsgate** (not savings, not refundable). After a 3-month trust period (`CAR_TRUST_MONTHS`; admin may go earlier) edynsgate provides a car it **owns** and pays the insurance; the car is returned if payments stop or the tenant leaves (`lib/car-assignments.ts`).
+  - The **program ledger** (`lib/program-ledger.ts`) holds landlord rent (**not revenue**, never partner equity; landlord payments can't exceed rent on hand) and logs car payments (revenue; used to count the trust period).
   - One Stripe subscription per tenant; the rent/car split is stamped on the **price metadata** and read per invoice by the webhook (`invoiceRentSplit`).
   - Month-end shortfall: cron `/api/cron/rent-shortfall` (27th) emails own-landlord tenants a balance + one-time "pay the difference" Checkout.
 - **Stripe Checkout sessions MUST set `metadata.type`.** The webhook routes on it (`'project_invoice'` + `invoiceId` + `phase`; `'rent_shortfall'` + `tenantId` + `month` + `baseCents`). A session without it is treated as a **tenant fee** and misrouted.

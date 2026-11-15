@@ -15,7 +15,7 @@ import {
   recordLeaseUpload,
   setShortfallSession,
 } from '@/lib/tenants'
-import { programOf } from '@/lib/programs'
+import { PROGRAMS, programOf } from '@/lib/programs'
 import { computeShortfall } from '@/lib/shortfall'
 import { withProcessingFee } from '@/lib/fees'
 import { parseTenantForm } from '@/lib/tenant-input'
@@ -196,7 +196,7 @@ export async function resumeApplicationPayment(): Promise<void> {
 export async function payShortfallAction(): Promise<void> {
   const session = await requireRole('tenant', '/tenants/login')
   const tenant = await getTenantByUserId(session.sub)
-  if (!tenant || programOf(tenant) !== 'own_landlord') redirect('/tenants')
+  if (!tenant || !PROGRAMS[programOf(tenant)].outsideLandlord) redirect('/tenants')
   const notice = tenant!.shortfall
   if (!notice || notice.paidAt) redirect('/tenants')
   if (!tenant!.stripeCustomerId) redirect('/tenants?shortfall=error')

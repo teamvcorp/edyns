@@ -58,9 +58,9 @@ export default async function AdminRevenuePage() {
             hint={`net of processing · ${formatCurrency(r.projectedMonthlyChargedCents / 100)} charged`}
           />
           <Stat
-            label="Held for program tenants"
+            label="Held for landlords"
             value={formatCurrency(r.projectedMonthlyHeldCents / 100)}
-            hint="monthly · landlord rent + car savings, not income"
+            hint="monthly · rent forwarded to outside landlords, not income"
           />
           <Stat label="Collected this month" value={formatCurrency(r.collectedThisMonthCents / 100)} hint="gross, from paid invoices" />
           <Stat label="Active subscriptions" value={String(r.activeCount)} />

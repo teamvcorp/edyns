@@ -8,9 +8,7 @@ import {
   recordLedgerEntry,
   balancesFor,
   PAYOUT_METHODS,
-  LEDGER_BUCKETS,
   type PayoutMethod,
-  type LedgerBucket,
 } from '@/lib/program-ledger'
 import { formatCents } from '@/lib/format'
 import { logError } from '@/lib/log'
@@ -21,8 +19,9 @@ import { logError } from '@/lib/log'
  *  - recordLandlordPaymentAction: staff paid the tenant's outside landlord
  *    (bill pay / ACH / check, OUTSIDE the app) → record it so the rent bucket
  *    goes down and the tenant sees it.
- *  - recordLedgerAdjustmentAction: a signed correction to either bucket with a
- *    required reason (e.g. refunding a rent surplus, fixing a typo).
+ *  - recordLedgerAdjustmentAction: a signed correction to the RENT bucket with a
+ *    required reason (e.g. refunding a rent surplus, fixing a typo). The car
+ *    bucket is a payment log (kept by edynsgate), so it has no balance to adjust.
  *
  * Every form carries a one-time `nonce` (randomUUID from the server render)
  * used as the ledger `ref`, so a double-submit records nothing twice.
@@ -117,30 +116,26 @@ export async function recordLedgerAdjustmentAction(_prev: FundsFormState, fd: Fo
 
   const tenantId = String(fd.get('tenantId') ?? '')
   const nonce = readNonce(fd)
-  const bucket = String(fd.get('bucket') ?? '') as LedgerBucket
   const amountCents = readCents(fd.get('amount'), { allowNegative: true })
   const note = String(fd.get('note') ?? '').trim().slice(0, MAX_TEXT)
 
   if (!nonce) return { error: 'This form expired — reload the page and try again.' }
-  if (!LEDGER_BUCKETS.includes(bucket)) return { error: 'Choose rent or car savings.' }
   if (amountCents === null) return { error: 'Enter a non-zero amount (negative to reduce the balance).' }
   if (!note) return { error: 'Explain the adjustment — it’s kept in the tenant’s history.' }
 
   const tenant = await getTenantById(tenantId)
   if (!tenant) return { error: 'Tenant not found.' }
-  const def = PROGRAMS[programOf(tenant)]
-  if (bucket === 'rent' && !def.outsideLandlord) return { error: 'This tenant has no rent bucket.' }
-  if (bucket === 'car' && def.carRate === 0) return { error: 'This tenant has no car savings.' }
+  if (!PROGRAMS[programOf(tenant)].outsideLandlord) return { error: 'This tenant has no rent held for a landlord.' }
 
   // A reduction can't take the bucket below zero.
   const balances = await balancesFor(tenantId)
-  const current = bucket === 'rent' ? balances.rentHeldCents : balances.carSavingsCents
+  const current = balances.rentHeldCents
   if (current + amountCents < 0) return { error: `That would make the balance negative (now ${formatCents(current)}).` }
 
   try {
     const result = await recordLedgerEntry({
       tenantId,
-      bucket,
+      bucket: 'rent',
       kind: 'adjustment',
       amountCents,
       ref: `adjust:${nonce}`,
@@ -155,5 +150,5 @@ export async function recordLedgerAdjustmentAction(_prev: FundsFormState, fd: Fo
   }
 
   revalidateFunds(tenantId)
-  return { ok: `Adjusted ${bucket === 'rent' ? 'rent' : 'car savings'} by ${formatCents(amountCents)}.` }
+  return { ok: `Adjusted rent on hand by ${formatCents(amountCents)}.` }
 }

@@ -7,7 +7,7 @@ import { safeEqual } from '@/lib/crypto'
 import { logError } from '@/lib/log'
 
 /**
- * Monthly rent-shortfall check for "Your Home + Car" (own_landlord) tenants.
+ * Monthly rent-shortfall check for outside-landlord tenants ("Your Home" / "Your Home + Car").
  * Scheduled near month end (vercel.json). For each tenant whose collected rent
  * won't cover this month's landlord rent, save a one-per-month notice and email
  * them the balance with an offer to pay the difference once (Checkout from the

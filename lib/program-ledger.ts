@@ -4,16 +4,18 @@ import { ObjectId, MongoServerError, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 
 /**
- * Program ledger — money edynsgate holds for "Your Home + Car" (own_landlord)
- * and "Car Savings" (car_only) tenants. Effort Exchange rent is NOT recorded
- * here (it's platform revenue + partner equity, lib/equity.ts).
+ * Program ledger — per-tenant money records for the non-Effort-Exchange
+ * programs (lib/programs.ts). Effort Exchange rent is NOT recorded here (it's
+ * platform revenue + partner equity, lib/equity.ts).
  *
  * Two buckets per tenant:
- *   rent — collected from the tenant, owed onward to their outside landlord.
- *          In: Stripe draft deposits + one-time shortfall payments.
+ *   rent — HELD: collected from the tenant, owed onward to their outside
+ *          landlord. In: Stripe draft deposits + one-time shortfall payments.
  *          Out: landlord payments staff send manually (bill pay / ACH / check).
- *   car  — car savings held until an admin-approved car purchase.
- *          In: Stripe draft deposits. Out: car_release on purchase.
+ *   car  — car-program PAYMENTS (a log, not a balance). The 10% is kept by
+ *          edynsgate to provide the car + insurance; entries exist so we can
+ *          count months paid toward the trust period (CAR_TRUST_MONTHS) and
+ *          audit what was collected. Nothing is ever paid out of this bucket.
  *
  * Design rules (teaching notes):
  *  - Append-only. Balances are COMPUTED (aggregation) from entries, never stored,
@@ -27,7 +29,7 @@ import { getDb } from './mongodb'
 export const LEDGER_BUCKETS = ['rent', 'car'] as const
 export type LedgerBucket = (typeof LEDGER_BUCKETS)[number]
 
-export const LEDGER_KINDS = ['deposit', 'shortfall_payment', 'landlord_payment', 'car_release', 'adjustment'] as const
+export const LEDGER_KINDS = ['deposit', 'shortfall_payment', 'landlord_payment', 'adjustment'] as const
 export type LedgerKind = (typeof LEDGER_KINDS)[number]
 
 export const PAYOUT_METHODS = ['bill_pay', 'ach', 'check', 'other'] as const
@@ -160,19 +162,21 @@ export type ProgramBalances = {
   rentHeldCents: number
   rentCollectedCents: number
   landlordPaidCents: number
-  /** Car savings available. */
-  carSavingsCents: number
-  carDepositedCents: number
-  carReleasedCents: number
+  /** Car program: total paid (kept by edynsgate — NOT a balance owed to the tenant). */
+  carPaidCents: number
+  /** Number of car-program payments (drafts). */
+  carPaymentCount: number
+  /** When the first car payment was made — the trust period counts from here. */
+  firstCarPaymentAt: Date | null
 }
 
 const EMPTY: ProgramBalances = {
   rentHeldCents: 0,
   rentCollectedCents: 0,
   landlordPaidCents: 0,
-  carSavingsCents: 0,
-  carDepositedCents: 0,
-  carReleasedCents: 0,
+  carPaidCents: 0,
+  carPaymentCount: 0,
+  firstCarPaymentAt: null,
 }
 
 /** Balances for many tenants at once (admin list pages). Missing tenants get zeros. */
@@ -184,23 +188,35 @@ export async function balancesForTenants(tenantIds: string[]): Promise<Map<strin
 
   const col = await ledgerCollection()
   const rows = await col
-    .aggregate<{ _id: { tenantId: ObjectId; bucket: LedgerBucket; kind: LedgerKind }; total: number }>([
+    .aggregate<{
+      _id: { tenantId: ObjectId; bucket: LedgerBucket; kind: LedgerKind }
+      total: number
+      count: number
+      firstAt: Date
+    }>([
       { $match: { tenantId: { $in: ids } } },
-      { $group: { _id: { tenantId: '$tenantId', bucket: '$bucket', kind: '$kind' }, total: { $sum: '$amountCents' } } },
+      {
+        $group: {
+          _id: { tenantId: '$tenantId', bucket: '$bucket', kind: '$kind' },
+          total: { $sum: '$amountCents' },
+          count: { $sum: 1 },
+          firstAt: { $min: '$at' },
+        },
+      },
     ])
     .toArray()
 
-  for (const { _id, total } of rows) {
+  for (const { _id, total, count, firstAt } of rows) {
     const b = result.get(_id.tenantId.toString())
     if (!b) continue
     if (_id.bucket === 'rent') {
       b.rentHeldCents += total
       if (_id.kind === 'landlord_payment') b.landlordPaidCents += -total
       else if (_id.kind === 'deposit' || _id.kind === 'shortfall_payment') b.rentCollectedCents += total
-    } else {
-      b.carSavingsCents += total
-      if (_id.kind === 'car_release') b.carReleasedCents += -total
-      else if (_id.kind === 'deposit') b.carDepositedCents += total
+    } else if (_id.kind === 'deposit') {
+      b.carPaidCents += total
+      b.carPaymentCount += count
+      b.firstCarPaymentAt = firstAt
     }
   }
   return result

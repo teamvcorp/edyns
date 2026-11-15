@@ -5,11 +5,10 @@ import { listRequestsByTenant } from '@/lib/moveins'
 import { getPropertyById } from '@/lib/properties'
 import { resumeApplicationPayment, payShortfallAction } from '@/app/actions/tenants'
 import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
-import { PROGRAMS, programOf, rateSummary } from '@/lib/programs'
+import { PROGRAMS, programOf, rateSummary, carEligibleOn, carTrustComplete, CAR_TRUST_MONTHS } from '@/lib/programs'
 import { balancesFor } from '@/lib/program-ledger'
 import { affordablePropertiesFor } from '@/lib/affordable-homes'
-import { getOpenCarOffer } from '@/lib/car-offers'
-import { respondCarOfferAction } from '@/app/actions/car-offers'
+import { getActiveCar } from '@/lib/car-assignments'
 import { PublicPropertyCard } from '@/components/properties/public-property-card'
 import { tierLabel } from '@/lib/tiers'
 import { formatAddress, formatCurrency, formatCents } from '@/lib/format'
@@ -21,7 +20,7 @@ import { hasActiveRequest } from '@/lib/moveins'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
-import { Button, ButtonLink, SoftButton } from '@/components/elements/button'
+import { Button, ButtonLink } from '@/components/elements/button'
 import { Link } from '@/components/elements/link'
 
 export const metadata: Metadata = { title: 'Tenant portal' }
@@ -43,7 +42,7 @@ const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: '
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ identity?: string; shortfall?: string; car?: string }>
+  searchParams: Promise<{ identity?: string; shortfall?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -66,9 +65,11 @@ export default async function TenantPortalPage({
   const status = statusCopy[tenant.status]
   const program = programOf(tenant)
   const def = PROGRAMS[program]
-  // Money edynsgate holds for this tenant (own_landlord / car_only only).
+  // Program ledger: rent held for their landlord + car-program payments (non-Effort-Exchange programs).
   const funds = !def.managedHousing && tenant.status === 'approved' ? await balancesFor(tenant.id) : null
-  const carOffer = def.carRate > 0 && tenant.status === 'approved' ? await getOpenCarOffer(tenant.id) : null
+  const activeCar = def.carRate > 0 && tenant.status === 'approved' ? await getActiveCar(tenant.id) : null
+  const carEligibleDate = funds ? carEligibleOn(funds.firstCarPaymentAt) : null
+  const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
   // Homes within budget (rent ≤ 30% of income) for approved tenants not yet in one of our homes.
   const budgetIncome = tenant.employment.verifiedMonthlyIncome ?? tenant.employment.monthlyIncome
   const affordable =
@@ -117,7 +118,7 @@ export default async function TenantPortalPage({
         )}
       </Card>
 
-      {/* Program + funds we hold (lib/programs.ts, lib/program-ledger.ts) */}
+      {/* Program + money records (lib/programs.ts, lib/program-ledger.ts) */}
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your program</h3>
@@ -142,8 +143,8 @@ export default async function TenantPortalPage({
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {def.carRate > 0 && (
               <div>
-                <dt className="text-sm text-olive-600 dark:text-olive-500">Car savings</dt>
-                <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCents(funds.carSavingsCents)}</dd>
+                <dt className="text-sm text-olive-600 dark:text-olive-500">Car payments made</dt>
+                <dd className="font-display text-3xl text-olive-950 dark:text-white">{funds.carPaymentCount}</dd>
               </div>
             )}
             {def.outsideLandlord && (
@@ -160,53 +161,31 @@ export default async function TenantPortalPage({
             )}
           </dl>
         )}
-        {def.carRate > 0 && (
-          <Text className="text-xs/5">
-            <p>
-              Car savings are held by edynsgate. When your savings cover a car we have available, our team will offer it
-              to you for approval.
-            </p>
-          </Text>
-        )}
       </Card>
 
-      {/* Car offer from our team (lib/car-offers.ts) */}
-      {(carOffer || sp.car) && (
-        <Card id="car-offer" className="flex flex-col gap-3">
-          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your car offer</h3>
-          {carOffer ? (
-            <>
-              <Text className="text-sm/6">
-                <p>
-                  <strong>{carOffer.vehicle}</strong> — {formatCents(carOffer.priceCents)}, paid from your car savings.
-                </p>
-                {carOffer.notes && <p>{carOffer.notes}</p>}
-              </Text>
-              {carOffer.status === 'offered' ? (
-                <div className="flex flex-wrap gap-3">
-                  <form action={respondCarOfferAction}>
-                    <input type="hidden" name="offerId" value={carOffer.id} />
-                    <input type="hidden" name="decision" value="accept" />
-                    <Button type="submit">Accept this car</Button>
-                  </form>
-                  <form action={respondCarOfferAction}>
-                    <input type="hidden" name="offerId" value={carOffer.id} />
-                    <input type="hidden" name="decision" value="decline" />
-                    <SoftButton type="submit">Decline</SoftButton>
-                  </form>
-                </div>
-              ) : (
-                <Text className="text-sm/6">
-                  <p>You accepted this car. Our team will contact you to finish the purchase.</p>
-                </Text>
-              )}
-            </>
+      {/* Car program: trust period, then an edynsgate-owned car + insurance (lib/car-assignments.ts) */}
+      {def.carRate > 0 && tenant.status === 'approved' && (
+        <Card id="car" className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your car</h3>
+          {activeCar ? (
+            <Text className="text-sm/6">
+              <p>
+                <strong>{activeCar.vehicle}</strong>
+                {activeCar.plate ? ` · plate ${activeCar.plate}` : ''}. edynsgate owns this car and pays its
+                insurance{activeCar.insurance ? ` (${activeCar.insurance})` : ''}. Keep up your car program payments to
+                keep using it — if payments stop or you leave the program, the car is returned.
+              </p>
+              {activeCar.notes && <p>{activeCar.notes}</p>}
+            </Text>
           ) : (
             <Text className="text-sm/6">
               <p>
-                {sp.car === 'declined'
-                  ? 'You declined the offer. Your savings stay with us, and we’ll let you know when another car fits.'
-                  : 'Thanks — our team will contact you to finish the purchase.'}
+                After {CAR_TRUST_MONTHS} months of car program payments, we provide a car and pay its insurance.{' '}
+                {carEligibleDate
+                  ? carTrusted
+                    ? 'You’ve completed the trust period — our team will contact you about your car.'
+                    : `You’re on track: your trust period ends ${carEligibleDate.toLocaleDateString()}.`
+                  : 'Your trust period starts with your first car program payment.'}
               </p>
             </Text>
           )}
@@ -418,7 +397,7 @@ export default async function TenantPortalPage({
       <Card className="flex flex-col gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">
-            {def.rentRate > 0 ? 'Rent collection' : 'Savings collection'}
+            {def.rentRate > 0 ? 'Rent collection' : 'Car program payments'}
           </h3>
           {billing && (
             <span className="text-sm font-semibold text-olive-700 capitalize dark:text-olive-300">{billing.status}</span>
@@ -436,7 +415,7 @@ export default async function TenantPortalPage({
             {billing.split && (
               <p className="mt-2">
                 Each draft: {formatCents(billing.split.rentCents)} toward rent
-                {billing.split.carCents > 0 ? ` and ${formatCents(billing.split.carCents)} into car savings` : ''}.
+                {billing.split.carCents > 0 ? ` and ${formatCents(billing.split.carCents)} for the car program` : ''}.
               </p>
             )}
             {(tenant.rentCredits?.length ?? 0) > 0 && (

@@ -512,7 +512,7 @@ export async function resetTenantVerificationAction(formData: FormData): Promise
 
 /**
  * Set up recurring collection for an approved tenant: the admin enters the
- * per-draft amounts for the tenant's program (rent and/or car savings — see
+ * per-draft amounts for the tenant's program (rent and/or car program — see
  * lib/programs.ts), the draft frequency, and the first draft date (after
  * reviewing verified income). Creates a Stripe subscription anchored to the
  * first draft date; the base amount is grossed up so the tenant covers Stripe's

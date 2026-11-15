@@ -5,16 +5,22 @@
 // the tenant dashboard copy. NEVER hard-code "40%" (or any rate) elsewhere —
 // read it from here so a rate change is a one-line edit.
 //
-// Business rules (decided 2026-11-14, see README "Business rules"):
-//   effort_exchange  40% of pay → rent for a home we manage (partner property).
-//   own_landlord     30% of pay → rent we forward to the tenant's own landlord
-//                    + 10% of pay → car savings held by edynsgate.
-//   car_only         10% of pay → car savings held by edynsgate.
+// Business rules (decided 2026-11-14, see README "Business rules"). Two building
+// blocks — HOUSING and the CAR PROGRAM — offered alone or combined:
+//   effort_exchange   40% of pay → rent for a home we manage (partner property).
+//   own_landlord      30% of pay → rent we forward to the tenant's own landlord.
+//   own_landlord_car  30% rent (as above) + 10% car program.
+//   car_only          10% car program only.
+// CAR PROGRAM: the 10% is KEPT by edynsgate (not savings, not refundable). After
+// a trust period (CAR_TRUST_MONTHS of payments, admin can provide earlier/later)
+// edynsgate provides a car it OWNS and pays its insurance; the car is returned
+// if the tenant stops paying or leaves (lib/car-assignments.ts).
 // Every program requires the 35-hr/week effort commitment (REQUIRED_WEEKLY_HOURS).
 
 import type { BillingFrequency } from './tenants' // type-only: erased at build, safe on the client
 
-export const PROGRAM_IDS = ['effort_exchange', 'own_landlord', 'car_only'] as const
+// Order = display order on the program chooser. Ids are stored on tenant records — never rename one.
+export const PROGRAM_IDS = ['effort_exchange', 'own_landlord', 'own_landlord_car', 'car_only'] as const
 export type ProgramId = (typeof PROGRAM_IDS)[number]
 
 /** Records created before programs existed have no `program` field → Effort Exchange. */
@@ -28,7 +34,7 @@ export interface ProgramDef {
   short: string
   /** Share of monthly pay collected as rent (0 when the program has no rent). */
   rentRate: number
-  /** Share of monthly pay collected into car savings. */
+  /** Share of monthly pay collected for the car program (kept by edynsgate; 0 = no car). */
   carRate: number
   /** True when the tenant lives in a home we manage (partner equity, repairs, move-ins apply). */
   managedHousing: boolean
@@ -51,24 +57,34 @@ export const PROGRAMS: Record<ProgramId, ProgramDef> = {
   },
   own_landlord: {
     id: 'own_landlord',
-    label: 'Your Home + Car',
+    label: 'Your Home',
     short: 'Own landlord',
+    rentRate: 0.3,
+    carRate: 0,
+    managedHousing: false,
+    outsideLandlord: true,
+    summary: 'Stay where you rent now. We collect 30% of your pay and pay your landlord for you.',
+  },
+  own_landlord_car: {
+    id: 'own_landlord_car',
+    label: 'Your Home + Car',
+    short: 'Home + car',
     rentRate: 0.3,
     carRate: 0.1,
     managedHousing: false,
     outsideLandlord: true,
     summary:
-      'Stay where you rent now. We collect 30% of your pay and pay your landlord, plus 10% saved toward a car.',
+      'Stay where you rent now — we pay your landlord from 30% of your pay. Add 10% and, after a few months, we provide a car and its insurance.',
   },
   car_only: {
     id: 'car_only',
-    label: 'Car Savings',
-    short: 'Car savings',
+    label: 'Car Program',
+    short: 'Car program',
     rentRate: 0,
     carRate: 0.1,
     managedHousing: false,
     outsideLandlord: false,
-    summary: 'We collect 10% of your pay and hold it toward a car. When you have enough, we help you get one.',
+    summary: 'Pay 10% of your pay. After a few months of payments, we provide a car and pay its insurance.',
   },
 }
 
@@ -91,8 +107,33 @@ export function rateSummary(program: ProgramId): string {
   const { rentRate, carRate } = PROGRAMS[program]
   const parts: string[] = []
   if (rentRate > 0) parts.push(`${pct(rentRate)}% rent`)
-  if (carRate > 0) parts.push(`${pct(carRate)}% car savings`)
+  if (carRate > 0) parts.push(`${pct(carRate)}% car program`)
   return parts.join(' + ')
+}
+
+/** Program ids with an outside landlord (rent forwarded by staff) — for DB queries. */
+export const OUTSIDE_LANDLORD_PROGRAMS = PROGRAM_IDS.filter((id) => PROGRAMS[id].outsideLandlord)
+
+// ---- Car program ------------------------------------------------------------
+
+/** Default months of car-program payments before edynsgate provides a car (admin can go earlier/later). */
+export const CAR_TRUST_MONTHS = 3
+
+/** Date the trust period ends, counted from the first car payment (null before any payment). */
+export function carEligibleOn(firstCarPaymentAt: Date | null | undefined): Date | null {
+  if (!firstCarPaymentAt) return null
+  const d = new Date(firstCarPaymentAt)
+  d.setMonth(d.getMonth() + CAR_TRUST_MONTHS)
+  return d
+}
+
+/**
+ * True once the trust period has ended. Reads the clock, so call it from a
+ * server action or a page's data-loading code — not inside JSX (React purity).
+ */
+export function carTrustComplete(firstCarPaymentAt: Date | null | undefined): boolean {
+  const eligible = carEligibleOn(firstCarPaymentAt)
+  return eligible !== null && eligible.getTime() <= Date.now()
 }
 
 // ---- Money math ---------------------------------------------------------------
@@ -163,8 +204,8 @@ export function parseProgramAmounts(
   if (rent === null || car === null) return { ok: false, error: 'Enter amounts in dollars (up to $20,000 each).' }
   if (def.rentRate > 0 && rent <= 0) return { ok: false, error: `Enter the rent amount (${pct(def.rentRate)}% of pay).` }
   if (def.rentRate === 0 && rent > 0) return { ok: false, error: `${def.label} has no rent component.` }
-  if (def.carRate > 0 && car <= 0) return { ok: false, error: `Enter the car savings amount (${pct(def.carRate)}% of pay).` }
-  if (def.carRate === 0 && car > 0) return { ok: false, error: `${def.label} has no car savings component.` }
+  if (def.carRate > 0 && car <= 0) return { ok: false, error: `Enter the car program amount (${pct(def.carRate)}% of pay).` }
+  if (def.carRate === 0 && car > 0) return { ok: false, error: `${def.label} has no car program component.` }
 
   const rentCents = Math.round(rent * 100)
   const carCents = Math.round(car * 100)

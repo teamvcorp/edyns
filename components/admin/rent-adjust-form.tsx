@@ -28,7 +28,7 @@ export function RentAdjustForm({
 }: {
   tenantId: string
   nonce: string
-  /** Current per-draft base amounts (dollars) split into rent and car savings. */
+  /** Current per-draft base amounts (dollars) split into rent and car program. */
   current: { rentDollars: number; carDollars: number; frequency: BillingFrequency; nextDraft: string }
   /** Earliest selectable next draft (yyyy-mm-dd), computed on the server. The action re-checks it. */
   minDate: string

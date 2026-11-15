@@ -6,7 +6,7 @@ import { encryptBuffer, decryptBuffer } from './crypto'
 import type { SniffedType } from './files'
 
 /**
- * Leases — uploaded by "Your Home + Car" (own_landlord) applicants so staff can
+ * Leases — uploaded by outside-landlord applicants ("Your Home" / "Your Home + Car") so staff can
  * confirm the rent we'll be forwarding to their landlord.
  *
  * Same security model as paystubs (lib/paystubs.ts), because a lease holds

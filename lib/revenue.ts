@@ -42,9 +42,10 @@ export type RevenueOverview = {
   /** Same projection on the amounts actually charged (incl. processing the tenant covers). */
   projectedMonthlyChargedCents: number
   /**
-   * Monthly base collected for own-landlord / car-savings tenants. NOT revenue:
-   * it's held for them (forwarded to landlords or saved toward a car —
-   * lib/program-ledger.ts), so it's excluded from projectedMonthlyBaseCents.
+   * Monthly rent collected for outside-landlord tenants. NOT revenue: it's held
+   * and forwarded to their landlords (lib/program-ledger.ts), so it's excluded
+   * from projectedMonthlyBaseCents. (Car-program payments ARE revenue — kept by
+   * edynsgate to provide the car + insurance.)
    */
   projectedMonthlyHeldCents: number
   activeCount: number
@@ -99,9 +100,13 @@ export async function getRevenueOverview(): Promise<RevenueOverview> {
     if (t.billing!.status !== 'active') continue
     const factor = MONTHLY_FACTOR[t.billing!.frequency]
     const monthlyBase = Math.round(t.billing!.baseAmountCents * factor)
-    // Only Effort Exchange rent is platform income; program funds are held for the tenant.
-    if (PROGRAMS[programOf(t)].managedHousing) projectedMonthlyBaseCents += monthlyBase
-    else projectedMonthlyHeldCents += monthlyBase
+    // Rent forwarded to an outside landlord is held, not income. Everything else
+    // (Effort Exchange rent, car-program payments) is platform income.
+    const heldBase = PROGRAMS[programOf(t)].outsideLandlord
+      ? Math.round((t.billing!.split?.rentCents ?? t.billing!.baseAmountCents) * factor)
+      : 0
+    projectedMonthlyHeldCents += heldBase
+    projectedMonthlyBaseCents += monthlyBase - heldBase
     projectedMonthlyChargedCents += Math.round(t.billing!.amountCents * factor)
   }
 

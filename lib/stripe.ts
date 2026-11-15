@@ -262,7 +262,7 @@ export async function fetchSubscriptionForImport(subscriptionId: string): Promis
 
 /**
  * Metadata stamped on every rent PRICE. The price travels with each invoice
- * line, so the webhook can split a paid invoice into rent vs car savings using
+ * line, so the webhook can split a paid invoice into rent vs car program using
  * the terms that were live WHEN IT WAS BILLED — a later rent change creates a
  * new price and can't rewrite history. Values are base cents (before the
  * processing fee). Stripe metadata values must be strings.

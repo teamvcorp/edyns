@@ -53,7 +53,7 @@ export default async function LandlordPaymentsPage() {
       <Card className="flex flex-col gap-4">
         <Text className="text-sm/6">
           <p>
-            Rent we collect for tenants in {PROGRAMS.own_landlord.label} is paid to their landlord by staff (bill pay,
+            Rent we collect for tenants in {PROGRAMS.own_landlord.label} and {PROGRAMS.own_landlord_car.label} is paid to their landlord by staff (bill pay,
             ACH or check). Record each payment on the tenant’s page. Showing {label}.
           </p>
         </Text>

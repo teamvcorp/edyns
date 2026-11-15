@@ -1,8 +1,9 @@
 import React from "react";
 
-// LEGAL REVIEW REQUIRED before launch (2026-11-14): section 2 now covers the
-// own-landlord (30% rent + 10% car) and car-savings (10%) programs — collecting
-// rent we forward to third-party landlords and holding car savings. Rates come
+// LEGAL REVIEW REQUIRED before launch (2026-11-14): section 2 covers the
+// outside-landlord programs (collecting rent we forward to third-party
+// landlords) and the car program (a company-owned vehicle + insurance provided
+// for 10% of wages after a trust period, returned if payments stop). Rates come
 // from lib/programs.ts; keep this text in sync if they change.
 
 export default function TermsOfService() {
@@ -43,7 +44,7 @@ export default function TermsOfService() {
             <li>No equity, ownership, or savings is created</li>
           </ul>
 
-          <h3 className="font-semibold mt-4">Your Home + Car</h3>
+          <h3 className="font-semibold mt-4">Your Home (with or without the Car Program)</h3>
           <ul className="list-disc list-inside mt-2 space-y-1">
             <li>30% of your wages is collected for rent, which we pay to the landlord you name</li>
             <li>
@@ -51,18 +52,24 @@ export default function TermsOfService() {
               remain responsible to your landlord under your lease, including any
               balance not covered
             </li>
-            <li>10% of your wages is collected as car savings (see below)</li>
           </ul>
 
-          <h3 className="font-semibold mt-4">Car Savings</h3>
+          <h3 className="font-semibold mt-4">Car Program</h3>
           <ul className="list-disc list-inside mt-2 space-y-1">
-            <li>10% of your wages is collected as car savings</li>
-          </ul>
-
-          <h3 className="font-semibold mt-4">About car savings</h3>
-          <ul className="list-disc list-inside mt-2 space-y-1">
-            <li>Car savings are held by the company. They are not a bank or deposit account in your name and do not earn interest</li>
-            <li>Car savings are released only toward a vehicle purchase approved by the company under program rules</li>
+            <li>10% of your wages is collected for the Car Program, alone or together with Your Home</li>
+            <li>
+              <strong>Car Program payments are retained by the company</strong>. They
+              are not savings, are not held on your behalf and are not refundable
+            </li>
+            <li>
+              After a trust period of car program payments (normally three months,
+              at the company’s discretion) the company provides a vehicle and pays
+              its insurance
+            </li>
+            <li>
+              The vehicle remains the property of the company. You must return it if
+              your payments stop or you leave the program
+            </li>
           </ul>
 
           <p className="mt-2">
@@ -126,7 +133,7 @@ export default function TermsOfService() {
             8. Risk Acknowledgment
           </h2>
           <ul className="list-disc list-inside space-y-1">
-            <li>Payments are not recoverable, except car savings released under program rules</li>
+            <li>Payments are not recoverable</li>
             <li>No ownership rights are created</li>
             <li>Access to housing depends on active participation</li>
           </ul>

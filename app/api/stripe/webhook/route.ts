@@ -42,7 +42,7 @@ function invoicePaidAt(invoice: Stripe.Invoice): Date {
 }
 
 /**
- * Own-landlord / car-savings tenants: split the paid invoice into the rent and
+ * Outside-landlord / car-program tenants: split the paid invoice into the rent and
  * car buckets of the program ledger (lib/program-ledger.ts). The split comes
  * from the invoice's Stripe price (terms live when it was billed); the tenant's
  * current record is only a fallback. Idempotent per invoice id. Throws on

@@ -94,29 +94,14 @@ export function LandlordPaymentForm({
   )
 }
 
-/** Signed correction to a bucket, with a required reason (kept in history). */
-export function LedgerAdjustmentForm({
-  tenantId,
-  nonce,
-  buckets,
-}: {
-  tenantId: string
-  nonce: string
-  buckets: ('rent' | 'car')[]
-}) {
+/** Signed correction to rent on hand, with a required reason (kept in history). */
+export function LedgerAdjustmentForm({ tenantId, nonce }: { tenantId: string; nonce: string }) {
   const [state, action, pending] = useActionState<FundsFormState, FormData>(recordLedgerAdjustmentAction, undefined)
   return (
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="tenantId" value={tenantId} />
       <input type="hidden" name="nonce" value={nonce} />
-      <div className="grid gap-4 sm:grid-cols-3">
-        <label className={labelClass}>
-          Bucket
-          <select name="bucket" required defaultValue={buckets[0]} className={inputClass}>
-            {buckets.includes('rent') && <option value="rent">Rent held</option>}
-            {buckets.includes('car') && <option value="car">Car savings</option>}
-          </select>
-        </label>
+      <div className="grid gap-4 sm:grid-cols-2">
         <label className={labelClass}>
           Amount (USD, negative to reduce)
           <input name="amount" type="number" step="0.01" required className={inputClass} />

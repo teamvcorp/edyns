@@ -81,7 +81,7 @@ export type ParsedTenantForm = {
     program: ProgramId
     landlord?: Landlord
   }
-  /** own_landlord: the validated lease bytes, ready for saveLeaseFile(). */
+  /** Outside-landlord programs: the validated lease bytes, ready for saveLeaseFile(). */
   lease?: Extract<CheckedUpload, { ok: true }>
 }
 

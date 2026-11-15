@@ -1,7 +1,7 @@
 import React from "react";
 
-// LEGAL REVIEW REQUIRED before launch (2026-11-14): section 1 and 7 now describe
-// the own-landlord and car-savings programs (lib/programs.ts).
+// LEGAL REVIEW REQUIRED before launch (2026-11-14): sections 1 and 7 describe
+// the outside-landlord programs and the car program (lib/programs.ts).
 
 export default function PrivacyPolicy() {
   return (
@@ -32,22 +32,24 @@ export default function PrivacyPolicy() {
           <ul className="list-disc list-inside mt-3 space-y-1">
             <li>
               Depending on your program, you agree that up to <strong>40% of your income</strong> may be
-              collected: 40% for the Effort Exchange, 30% for rent plus 10% for car
-              savings for Your Home + Car, or 10% for Car Savings.
+              collected: 40% for the Effort Exchange, 30% for Your Home, 30% plus 10%
+              for Your Home + Car, or 10% for the Car Program.
             </li>
             <li>
               Effort Exchange funds are exchanged for housing accommodations and
               utilities and are <strong>retained by the company</strong>.
             </li>
             <li>
-              Your Home + Car rent funds are paid to the landlord you name. Car
-              savings are held by the company (not in trust, savings or investment
-              accounts in your name) and released only toward an approved vehicle
-              purchase.
+              Your Home rent funds are paid to the landlord you name. Car Program
+              payments are retained by the company to provide a company-owned
+              vehicle and its insurance; they are not held in trust, savings or
+              investment on your behalf.
             </li>
             <li>
-              For Your Home + Car, we share payment details with your landlord and
-              collect their contact information and your lease to pay your rent.
+              For Your Home programs, we share payment details with your landlord and
+              collect their contact information and your lease to pay your rent. For
+              the Car Program, we keep vehicle and insurance details for the car we
+              provide.
             </li>
             <li>
               Participation is voluntary and based on your agreement to these terms.
@@ -129,7 +131,7 @@ export default function PrivacyPolicy() {
             By using the platform, you acknowledge:
           </p>
           <ul className="list-disc list-inside mt-2 space-y-1">
-            <li>No ownership is created from payments; car savings are held by the company under program rules</li>
+            <li>No savings or ownership is created from payments; vehicles provided under the Car Program remain company property</li>
             <li>Funds paid are not recoverable unless explicitly stated</li>
             <li>Service access may depend on continued payment participation</li>
           </ul>

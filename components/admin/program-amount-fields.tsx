@@ -82,7 +82,7 @@ export function ProgramAmountFields({
         )}
         {def.carRate > 0 && (
           <label className={labelClass}>
-            Car savings per draft (USD, {pct(def.carRate)}% of pay)
+            Car program per draft (USD, {pct(def.carRate)}% of pay)
             <input
               name="carAmount"
               type="number"
