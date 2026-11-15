@@ -226,6 +226,7 @@ When adding an API endpoint, use a **Route Handler** (`app/api/.../route.ts`) �
 - **`demo/` is gone** — the reference kit was deleted after its pieces were absorbed into `components/`.
 - **Cron:** `vercel.json` schedules `/api/cron/income-check` daily at 12:00 UTC and `/api/cron/rent-shortfall` on the 27th at 15:00 UTC; both require the `CRON_SECRET` bearer token.
 - **Verify with `npm run build`** — there is no test suite; live smoke-testing is done manually.
+- **Watching errors:** every server log line is in Vercel → Project → Logs. Search `[unhandled]` for crashes Next caught (from `instrumentation.ts`), `[client-error]` for browser crashes, or a log context such as `stripe/webhook`. The "Reference" code on the error page is the `digest` in the `[unhandled]` line.
 
 ---
 

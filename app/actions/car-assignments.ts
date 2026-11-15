@@ -7,6 +7,7 @@ import { PROGRAMS, programOf, carEligibleOn, carTrustComplete, CAR_TRUST_MONTHS 
 import { balancesFor } from '@/lib/program-ledger'
 import { assignCar, getCarAssignment, returnCar } from '@/lib/car-assignments'
 import { sendCarAssignedEmail } from '@/lib/email'
+import { logError } from '@/lib/log'
 
 /**
  * Car program (lib/car-assignments.ts): admins provide an edynsgate-owned car
@@ -71,7 +72,8 @@ export async function assignCarAction(_prev: CarFormState, fd: FormData): Promis
   let emailNote = ''
   try {
     await sendCarAssignedEmail({ to: tenant.email, name: tenant.name, vehicle })
-  } catch {
+  } catch (err) {
+    logError('car-assignments/email', err, { tenantId })
     emailNote = ' (the email failed — let the tenant know directly)'
   }
 
