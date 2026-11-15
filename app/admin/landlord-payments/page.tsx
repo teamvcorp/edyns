@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { requireRole } from '@/lib/dal'
 import { listTenants } from '@/lib/tenants'
-import { programOf, PROGRAMS } from '@/lib/programs'
+import { programOf, PROGRAMS, isUpgradeReady } from '@/lib/programs'
 import { balancesForTenants, sumBetween } from '@/lib/program-ledger'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
@@ -40,9 +40,11 @@ export default async function LandlordPaymentsPage() {
     const paidCents = -paidThisMonth[i] // landlord payments are stored negative
     const heldCents = balances.get(t.id)?.rentHeldCents ?? 0
     const dueCents = Math.max(0, rentCents - paidCents)
+    // Reserve = available funds beyond what's still owed this month (lib/programs.ts upgrade rule).
+    const upgradeReady = isUpgradeReady(Math.max(0, heldCents - dueCents), rentCents)
     const status =
       dueCents === 0 ? 'Paid' : heldCents >= dueCents ? 'Ready to pay' : `Short ${formatCents(dueCents - heldCents)}`
-    return { t, rentCents, paidCents, heldCents, dueCents, status }
+    return { t, rentCents, paidCents, heldCents, dueCents, status, upgradeReady }
   })
   // Most urgent first: ready to pay, then short, then paid.
   const rank = (s: string) => (s === 'Ready to pay' ? 0 : s === 'Paid' ? 2 : 1)
@@ -68,15 +70,20 @@ export default async function LandlordPaymentsPage() {
                   <th className="py-2 pr-4 font-medium">Landlord</th>
                   <th className="py-2 pr-4 font-medium">Monthly rent</th>
                   <th className="py-2 pr-4 font-medium">Paid this month</th>
-                  <th className="py-2 pr-4 font-medium">On hand</th>
+                  <th className="py-2 pr-4 font-medium">Available funds</th>
                   <th className="py-2 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody className="text-olive-950 dark:text-white">
-                {rows.map(({ t, rentCents, paidCents, heldCents, status }) => (
+                {rows.map(({ t, rentCents, paidCents, heldCents, status, upgradeReady }) => (
                   <tr key={t.id} className="border-t border-olive-950/10 dark:border-white/10">
                     <td className="py-2 pr-4">
                       <Link href={`/admin/tenants/${t.id}`}>{t.name}</Link>
+                      {upgradeReady && (
+                        <span className="ml-2 rounded-full bg-olive-950/10 px-2 py-0.5 text-xs font-semibold dark:bg-white/10">
+                          Upgrade-ready
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 pr-4">{t.landlord?.name ?? '—'}</td>
                     <td className="py-2 pr-4">{formatCents(rentCents)}</td>

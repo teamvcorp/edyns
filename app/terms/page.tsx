@@ -52,6 +52,13 @@ export default function TermsOfService() {
               remain responsible to your landlord under your lease, including any
               balance not covered
             </li>
+            <li>
+              Rent collected beyond what your landlord is owed is <strong>retained by
+              the company and is not refundable</strong>. It is credited to your
+              available rent funds, which the company may use to cover your future
+              rent (for example during a job change) and considers when offering
+              you an upgraded home
+            </li>
           </ul>
 
           <h3 className="font-semibold mt-4">Car Program</h3>

@@ -7,6 +7,7 @@ import { resumeApplicationPayment, payShortfallAction } from '@/app/actions/tena
 import { REQUIRED_WEEKLY_HOURS } from '@/lib/stripe'
 import { PROGRAMS, programOf, rateSummary, carEligibleOn, carTrustComplete, CAR_TRUST_MONTHS } from '@/lib/programs'
 import { balancesFor } from '@/lib/program-ledger'
+import { rentFunds } from '@/lib/shortfall'
 import { affordablePropertiesFor } from '@/lib/affordable-homes'
 import { getActiveCar } from '@/lib/car-assignments'
 import { PublicPropertyCard } from '@/components/properties/public-property-card'
@@ -70,6 +71,8 @@ export default async function TenantPortalPage({
   const activeCar = def.carRate > 0 && tenant.status === 'approved' ? await getActiveCar(tenant.id) : null
   const carEligibleDate = funds ? carEligibleOn(funds.firstCarPaymentAt) : null
   const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
+  // Available rent funds (outside-landlord): reserve beyond this month + upgrade readiness.
+  const rentReserve = funds && def.outsideLandlord ? await rentFunds(tenant) : null
   // Homes within budget (rent ≤ 30% of income) for approved tenants not yet in one of our homes.
   const budgetIncome = tenant.employment.verifiedMonthlyIncome ?? tenant.employment.monthlyIncome
   const affordable =
@@ -139,6 +142,21 @@ export default async function TenantPortalPage({
             </p>
           </Text>
         )}
+        {rentReserve && (
+          <Text className="text-xs/5">
+            <p>
+              Rent we collect beyond what your landlord is owed stays in your available rent funds. It isn’t
+              refundable, but it covers your rent if you change jobs or come up short, and as it grows you can be
+              offered a nicer home.
+            </p>
+          </Text>
+        )}
+        {rentReserve?.upgradeReady && (
+          <p role="status" className="rounded-xl bg-olive-950/5 px-4 py-3 text-sm text-olive-950 dark:bg-white/5 dark:text-white">
+            Your rent funds have built up — you may qualify for a nicer home (bigger, better appliances, a nicer area).
+            Our team will reach out with options.
+          </p>
+        )}
         {funds && (
           <dl className="grid grid-cols-2 gap-4 sm:grid-cols-3">
             {def.carRate > 0 && (
@@ -150,7 +168,7 @@ export default async function TenantPortalPage({
             {def.outsideLandlord && (
               <>
                 <div>
-                  <dt className="text-sm text-olive-600 dark:text-olive-500">Rent on hand for your landlord</dt>
+                  <dt className="text-sm text-olive-600 dark:text-olive-500">Available rent funds</dt>
                   <dd className="font-display text-3xl text-olive-950 dark:text-white">{formatCents(funds.rentHeldCents)}</dd>
                 </div>
                 <div>

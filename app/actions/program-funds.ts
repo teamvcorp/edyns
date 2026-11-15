@@ -20,7 +20,8 @@ import { logError } from '@/lib/log'
  *    (bill pay / ACH / check, OUTSIDE the app) → record it so the rent bucket
  *    goes down and the tenant sees it.
  *  - recordLedgerAdjustmentAction: a signed correction to the RENT bucket with a
- *    required reason (e.g. refunding a rent surplus, fixing a typo). The car
+ *    required reason (e.g. fixing a data-entry mistake). Surplus rent is NEVER
+ *    refunded — it stays as the tenant's available rent funds (business rule). The car
  *    bucket is a payment log (kept by edynsgate), so it has no balance to adjust.
  *
  * Every form carries a one-time `nonce` (randomUUID from the server render)
@@ -84,7 +85,7 @@ export async function recordLandlordPaymentAction(_prev: FundsFormState, fd: For
   const { rentHeldCents } = await balancesFor(tenantId)
   if (amountCents > rentHeldCents) {
     return {
-      error: `Only ${formatCents(rentHeldCents)} of this tenant’s rent is on hand. Collect the shortfall first, or record a smaller payment.`,
+      error: `Only ${formatCents(rentHeldCents)} is in this tenant’s available rent funds. Collect the shortfall first, or record a smaller payment.`,
     }
   }
 
@@ -150,5 +151,5 @@ export async function recordLedgerAdjustmentAction(_prev: FundsFormState, fd: Fo
   }
 
   revalidateFunds(tenantId)
-  return { ok: `Adjusted rent on hand by ${formatCents(amountCents)}.` }
+  return { ok: `Adjusted available rent funds by ${formatCents(amountCents)}.` }
 }

@@ -111,6 +111,23 @@ export function rateSummary(program: ProgramId): string {
   return parts.join(' + ')
 }
 
+// ---- Available rent funds (outside-landlord programs) -------------------------
+//
+// Rent collected but not yet paid to the landlord stays with edynsgate as the
+// tenant's AVAILABLE RENT FUNDS. Business rules (2026-11-14): it is never
+// refunded; it covers future rent (shortfalls, a job change); and once the
+// reserve beyond this month's rent reaches UPGRADE_RESERVE_MONTHS of rent, staff
+// may offer the tenant a nicer home (higher housing tier: bigger, better
+// appliances, nicer area).
+
+/** Months of rent held in reserve (beyond this month's) before a tenant is upgrade-ready. Adjust here. */
+export const UPGRADE_RESERVE_MONTHS = 2
+
+/** True when the reserve (available funds beyond this month's rent) reaches the upgrade threshold. */
+export function isUpgradeReady(reserveCents: number, monthlyRentCents: number): boolean {
+  return monthlyRentCents > 0 && reserveCents >= UPGRADE_RESERVE_MONTHS * monthlyRentCents
+}
+
 /** Program ids with an outside landlord (rent forwarded by staff) — for DB queries. */
 export const OUTSIDE_LANDLORD_PROGRAMS = PROGRAM_IDS.filter((id) => PROGRAMS[id].outsideLandlord)
 

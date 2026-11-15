@@ -2,6 +2,7 @@ import 'server-only'
 
 import type { Tenant } from './tenants'
 import { balancesFor, sumBetween } from './program-ledger'
+import { isUpgradeReady } from './programs'
 
 /**
  * Own-landlord rent shortfall math, shared by the monthly cron
@@ -10,8 +11,9 @@ import { balancesFor, sumBetween } from './program-ledger'
  *   owed this month = landlord rent − already paid to the landlord this month
  *   shortfall       = owed this month − rent on hand (collected, not yet paid out)
  *
- * Any surplus (on hand > owed) simply stays in the rent bucket as a buffer for
- * future months (business decision; admins can refund it with an adjustment).
+ * Any surplus (on hand > owed) stays with edynsgate as the tenant's AVAILABLE
+ * RENT FUNDS (business rule): never refunded, it covers future rent (shortfalls,
+ * a job change) and builds toward a nicer-home upgrade (UPGRADE_RESERVE_MONTHS).
  */
 
 /** 'YYYY-MM' plus the [start, end) bounds of that calendar month (server local time). */
@@ -39,5 +41,25 @@ export async function computeShortfall(
     onHandCents: rentHeldCents,
     owedCents,
     shortfallCents: Math.max(0, owedCents - rentHeldCents),
+  }
+}
+
+/**
+ * Available rent funds for an outside-landlord tenant: everything collected and
+ * not yet paid out, the part still owed for this month, the RESERVE beyond it,
+ * and whether that reserve makes them upgrade-ready for a nicer home.
+ */
+export async function rentFunds(
+  tenant: Tenant,
+  now: Date = new Date(),
+): Promise<{ availableCents: number; owedThisMonthCents: number; reserveCents: number; upgradeReady: boolean } | null> {
+  const s = await computeShortfall(tenant, now)
+  if (!s) return null
+  const reserveCents = Math.max(0, s.onHandCents - s.owedCents)
+  return {
+    availableCents: s.onHandCents,
+    owedThisMonthCents: s.owedCents,
+    reserveCents,
+    upgradeReady: isUpgradeReady(reserveCents, s.rentCents),
   }
 }

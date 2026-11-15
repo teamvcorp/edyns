@@ -19,6 +19,7 @@ import { StripeLinkForm } from '@/components/admin/stripe-link-form'
 import { RentPauseForm } from '@/components/admin/rent-pause-form'
 import { LandlordPaymentForm, LedgerAdjustmentForm } from '@/components/admin/program-funds-forms'
 import { balancesFor, listLedger } from '@/lib/program-ledger'
+import { rentFunds } from '@/lib/shortfall'
 import { listCarAssignments } from '@/lib/car-assignments'
 import { AssignCarForm, ReturnCarForm } from '@/components/admin/car-assignment-forms'
 import { randomUUID } from 'node:crypto'
@@ -42,6 +43,7 @@ import {
   carEligibleOn,
   carTrustComplete,
   CAR_TRUST_MONTHS,
+  UPGRADE_RESERVE_MONTHS,
 } from '@/lib/programs'
 import {
   REQUIRED_WEEKLY_HOURS,
@@ -169,6 +171,7 @@ export default async function AdminTenantReviewPage({
   // Car trust period: CAR_TRUST_MONTHS from the first car payment (lib/programs.ts).
   const carEligibleDate = funds ? carEligibleOn(funds.firstCarPaymentAt) : null
   const carTrusted = funds ? carTrustComplete(funds.firstCarPaymentAt) : false
+  const rentReserve = funds && PROGRAMS[program].outsideLandlord ? await rentFunds(t) : null
   // e.g. "visa •••• 4242" — never the full number.
   const pmLabel = t.defaultPaymentMethodId ? await paymentMethodLabel(t.defaultPaymentMethodId) : null
 
@@ -797,7 +800,13 @@ export default async function AdminTenantReviewPage({
             <dl className="grid gap-4 sm:grid-cols-3">
               {PROGRAMS[program].outsideLandlord && (
                 <>
-                  <Row label="Rent on hand (owed to landlord)" value={formatCents(funds.rentHeldCents)} />
+                  <Row label="Available rent funds" value={formatCents(funds.rentHeldCents)} />
+                  {rentReserve && (
+                    <Row
+                      label="Reserve beyond this month"
+                      value={`${formatCents(rentReserve.reserveCents)}${rentReserve.upgradeReady ? ' · upgrade-ready' : ''}`}
+                    />
+                  )}
                   <Row label="Rent collected (all time)" value={formatCents(funds.rentCollectedCents)} />
                   <Row label="Paid to landlord (all time)" value={formatCents(funds.landlordPaidCents)} />
                 </>
@@ -825,6 +834,13 @@ export default async function AdminTenantReviewPage({
                 </>
               )}
             </dl>
+
+            {rentReserve?.upgradeReady && (
+              <p className="text-sm font-medium text-olive-950 dark:text-white">
+                Upgrade-ready: their reserve is at least {UPGRADE_RESERVE_MONTHS} months of rent. Consider offering a
+                nicer home (higher tier). Funds stay with edynsgate and aren’t refundable.
+              </p>
+            )}
 
             {t.shortfall && (
               <p className={t.shortfall.paidAt ? 'text-sm text-olive-700 dark:text-olive-300' : 'text-sm text-amber-700 dark:text-amber-400'}>
@@ -906,7 +922,7 @@ export default async function AdminTenantReviewPage({
 
             {PROGRAMS[program].outsideLandlord && (
               <div className="flex flex-col gap-3 border-t border-olive-950/10 pt-4 dark:border-white/10">
-                <h4 className="font-semibold text-olive-950 dark:text-white">Adjust rent on hand</h4>
+                <h4 className="font-semibold text-olive-950 dark:text-white">Adjust available rent funds</h4>
                 <LedgerAdjustmentForm tenantId={t.id} nonce={randomUUID()} />
               </div>
             )}
