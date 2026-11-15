@@ -84,7 +84,21 @@ webhook verification (`verifyPlaidWebhook`), logging (`lib/log.ts`), rate limits
   collection); switching back re-creates it.
 - Tenant dashboard: linked account, recent paychecks and what was collected from each.
 
-### Phase 7 — Docs & verification
+### Phase 7 — Bank statements fallback (Plaid Statements)
+For tenants whose **payroll can't be found** (Plaid Income returns nothing, or they're flagged for manual review):
+- Admin clicks **"Request bank statements"** → tenant gets a portal prompt to approve Statements on their already
+  linked bank (Plaid **update mode**, `products: ['statements']`, last ~3 months). Added only where needed because
+  Plaid bills Statements per Item by months requested, even if never downloaded.
+- Server lists + downloads the PDFs (`/statements/list`, `/statements/download`), validates `%PDF-` bytes, stores
+  them **encrypted** in a `statements` collection (same model as `lib/paystubs.ts` / `lib/leases.ts`), admin-only
+  no-store viewer route. Retention limit (e.g. delete after the review decision + N days).
+- Admin review panel shows each month's PDF next to the **total deposits Plaid Transactions saw** that month (a
+  cross-check), then records the verified monthly income with the existing manual-income form
+  (`setVerifiedIncomeManually`).
+- Unsupported bank (`PRODUCTS_NOT_SUPPORTED`) → fall back to the existing admin paystub upload.
+- Reference: `docs/vendor/plaid-statements.md`.
+
+### Phase 8 — Docs & verification
 - README business rules, CODEMAP, memory notes.
 
 ## Verification (sandbox / test mode)
@@ -95,6 +109,8 @@ webhook verification (`verifyPlaidWebhook`), logging (`lib/log.ts`), rate limits
 4. Stripe test PMs: insufficient funds → failed path; dispute → paycheck mode stops.
 5. Paused billing / unhealthy Item → no collection.
 6. Effort Exchange tenant on `schedule` mode unchanged end to end.
+7. Statements: sandbox Item → admin requests statements → tenant update-mode consent → mock PDF downloaded,
+   stored encrypted, viewable only by admin; unsupported bank shows the paystub fallback.
 
 ## Decisions (2026-11-14)
 - **Same account only:** the paycheck account is both watched and debited; mask must match Stripe's last 4 (the
@@ -103,4 +119,7 @@ webhook verification (`verifyPlaidWebhook`), logging (`lib/log.ts`), rate limits
 - **Self-employed:** all deposits collected automatically.
 - **Rollout:** **paycheck mode is the default for new tenants** (once the feature flag is on); existing tenants
   switch when they link a bank. Fixed-schedule mode remains for tenants who can't link a bank.
-- Still requires: Plaid Transactions production approval, lawyer review of the authorization + Terms.
+- **Statements fallback:** Plaid Statements requested (2026-11-14) for tenants whose payroll can't be found;
+  staff review PDF statements for total deposits (Phase 7).
+- Still requires: Plaid Transactions **and Statements** production approval, lawyer review of the authorization +
+  Terms.
