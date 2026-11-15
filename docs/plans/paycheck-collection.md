@@ -98,6 +98,25 @@ For tenants whose **payroll can't be found** (Plaid Income returns nothing, or t
 - Unsupported bank (`PRODUCTS_NOT_SUPPORTED`) → fall back to the existing admin paystub upload.
 - Reference: `docs/vendor/plaid-statements.md`.
 
+#### 7b — AI-assisted statement reading (Claude API, decided 2026-11-14)
+- New `lib/statement-reader.ts` (server-only) using the official `@anthropic-ai/sdk`, model `claude-opus-5-5`.
+  Send the stored PDFs as base64 `document` blocks (32 MB / 600-page limits) and request **structured output**
+  (`output_config.format` / `messages.parse`): every deposit line `{ date, amount, description, kind: 'pay' |
+  'own_transfer' | 'refund' | 'other', confidence }` plus statement period + account mask.
+- **Code does the math, not the model:** per-month totals and the average monthly deposit are summed in our code
+  from the extracted lines, so any misread line is visible and correctable.
+- Cross-check each month against Plaid Transactions deposit totals; flag differences above a threshold.
+- **Human decision:** the admin review panel shows PDF + extracted lines + totals + flags; the admin confirms or
+  corrects and saves verified income with `setVerifiedIncomeManually`. The AI never approves or sets amounts.
+- Robustness: always check `stop_reason` (handle `refusal` → enable server-side `fallbacks: "default"` beta
+  `server-side-fallback-2026-07-01`); validate the parsed output; any failure → plain manual review, never blocks
+  the tenant. Runs on admin request (or automatically after statements arrive), once per statement set; cache the
+  result with the statement record.
+- Privacy/security: statements are sensitive PII sent to Anthropic for processing — disclose in Privacy, include
+  in counsel review; consider a zero-data-retention agreement with Anthropic. Log ids + totals only, never
+  statement content. Key in `ANTHROPIC_API_KEY` (Vercel env, never committed; local `.env.local`).
+- Est. cost ≈ $0.10–$0.25 per tenant review (3 statements × ~5–10 pages at Opus 5.5 $4 / $20 per MTok).
+
 ### Phase 8 — Docs & verification
 - README business rules, CODEMAP, memory notes.
 
@@ -111,6 +130,8 @@ For tenants whose **payroll can't be found** (Plaid Income returns nothing, or t
 6. Effort Exchange tenant on `schedule` mode unchanged end to end.
 7. Statements: sandbox Item → admin requests statements → tenant update-mode consent → mock PDF downloaded,
    stored encrypted, viewable only by admin; unsupported bank shows the paystub fallback.
+8. AI reading: run on the sandbox mock statement and 2–3 real redacted samples; check every extracted line against
+   the PDF, totals computed in code, Plaid cross-check flags a deliberate mismatch; API failure → manual review.
 
 ## Decisions (2026-11-14)
 - **Same account only:** the paycheck account is both watched and debited; mask must match Stripe's last 4 (the
@@ -121,5 +142,7 @@ For tenants whose **payroll can't be found** (Plaid Income returns nothing, or t
   switch when they link a bank. Fixed-schedule mode remains for tenants who can't link a bank.
 - **Statements fallback:** Plaid Statements requested (2026-11-14) for tenants whose payroll can't be found;
   staff review PDF statements for total deposits (Phase 7).
+- **AI statement reading:** Claude (Opus 5.5) extracts deposit lines; code totals; admin decides (Phase 7b).
+  Needs `ANTHROPIC_API_KEY` (user obtaining it 2026-11-14).
 - Still requires: Plaid Transactions **and Statements** production approval, lawyer review of the authorization +
   Terms.
