@@ -14,6 +14,7 @@ import {
   setBillingStatusBySubscription,
   clearPaycheckAuthorization,
   removeBankLink,
+  setStatementsState,
 } from '@/lib/tenants'
 import { exchangePublicToken, getItemAccount, removePlaidItem } from '@/lib/plaid'
 import { encryptString, decryptString } from '@/lib/crypto'
@@ -110,11 +111,26 @@ export async function completeBankLink(publicToken: string, accountId: string): 
   return { ok: 'Bank connected.' }
 }
 
-/** Update mode finished (re-sign-in or statements consent): mark healthy and sync. */
-export async function completeBankRelink(): Promise<PaycheckActionResult> {
+/**
+ * Update mode finished. 'relink' = the tenant signed in again → mark healthy and
+ * sync. 'statements' = they approved sharing statements → record consent and
+ * fetch the statements right away for the admin's income review.
+ */
+export async function completeBankRelink(mode: 'relink' | 'statements' = 'relink'): Promise<PaycheckActionResult> {
   const session = await requireRole('tenant', '/tenants/login')
   const tenant = await getTenantByUserId(session.sub)
   if (!tenant?.bankLink) return { error: 'No bank connection on file.' }
+  if (mode === 'statements') {
+    await setStatementsState(tenant.id, { ...tenant.bankLink.statements, consentedAt: new Date() })
+    try {
+      const { fetchStatementsForTenant } = await import('@/lib/statements')
+      await fetchStatementsForTenant(tenant.id)
+    } catch (err) {
+      logError('paychecks/statements-after-consent', err, { tenantId: tenant.id })
+    }
+    revalidateTenant(tenant.id)
+    return { ok: 'Thanks — your statements were shared with our team.' }
+  }
   await setBankLinkStatus(tenant.id, 'active')
   try {
     await syncTenantDeposits(tenant.id)

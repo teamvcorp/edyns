@@ -169,12 +169,13 @@ function isoDate(d: Date): string {
 }
 
 /**
- * Link token to connect the bank account a tenant's paycheck lands in.
- * - `transactions`: watch for paycheck deposits.
- * - `statements` in additional_consented_products: consent is collected now but
- *   Plaid doesn't bill until we actually call Statements (income fallback only).
- * Pass `accessToken` for UPDATE MODE (re-link a broken connection, or add
- * statements consent to an existing Item).
+ * Link token for the bank account a tenant's paycheck lands in.
+ * - New link: `transactions` only (watch for paycheck deposits).
+ * - `accessToken` + `statementsOnly`: UPDATE MODE adding Statements to that
+ *   Item, only when an income review needs it. (Plaid production rejects
+ *   `statements` in additional_consented_products — and it bills Statements per
+ *   Item by months requested, so asking only when needed also saves money.)
+ * - `accessToken` alone: update mode to repair a broken connection.
  */
 export async function createBankLinkToken(
   clientUserId: string,
@@ -193,14 +194,14 @@ export async function createBankLinkToken(
     ...(redirectUri ? { redirect_uri: redirectUri } : {}),
     ...(webhook?.startsWith('https://') ? { webhook } : {}),
     ...(opts.accessToken
-      ? // Update mode: products only when adding a product (statements) to the Item.
-        { access_token: opts.accessToken, ...(opts.statementsOnly ? { products: [Products.Statements] } : {}) }
-      : {
-          products: [Products.Transactions],
-          additional_consented_products: [Products.Statements],
-          transactions: { days_requested: 90 },
-        }),
-    statements: { start_date: isoDate(start), end_date: isoDate(end) },
+      ? {
+          access_token: opts.accessToken,
+          // Update mode lists products only when ADDING one (statements) to the Item.
+          ...(opts.statementsOnly
+            ? { products: [Products.Statements], statements: { start_date: isoDate(start), end_date: isoDate(end) } }
+            : {}),
+        }
+      : { products: [Products.Transactions], transactions: { days_requested: 90 } }),
   })
   return res.data.link_token
 }

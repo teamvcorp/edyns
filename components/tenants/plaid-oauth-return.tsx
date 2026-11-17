@@ -45,8 +45,8 @@ export function PlaidOAuthReturn() {
         const res =
           purpose === 'bank-link'
             ? await completeBankLink(publicToken, metadata.accounts?.[0]?.id ?? '')
-            : purpose === 'bank-relink'
-              ? await completeBankRelink()
+            : purpose === 'bank-relink' || purpose === 'bank-statements'
+              ? await completeBankRelink(purpose === 'bank-statements' ? 'statements' : 'relink')
               : await completePlaidLink(publicToken)
         if (res?.error) setError(res.error)
         else router.replace('/tenants')

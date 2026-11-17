@@ -143,7 +143,13 @@ export interface BankLink {
   linkedAt: Date
   lastSyncedAt?: Date
   /** Plaid Statements (income fallback): consent collected via additional_consented_products. */
-  statements?: { requestedAt?: Date; status?: 'needs_consent' | 'fetched' | 'unsupported' | 'error'; fetchedAt?: Date }
+  statements?: {
+    requestedAt?: Date
+    status?: 'needs_consent' | 'fetched' | 'unsupported' | 'error'
+    fetchedAt?: Date
+    /** When the tenant approved sharing statements (Plaid update mode). */
+    consentedAt?: Date
+  }
 }
 
 /**

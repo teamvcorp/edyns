@@ -14,6 +14,10 @@ statements so staff can review **total deposits**. Requested from Plaid alongsid
 
 ## Link
 
+> **Verified 2026-11-17:** `statements` is NOT allowed in `additional_consented_products` — Plaid returns
+> `INVALID_FIELD: additional_consented_products cannot contain: [statements]` (production and sandbox). We link
+> with Transactions only and add Statements later via UPDATE MODE when an income review needs it.
+
 - `/link/token/create` with a `statements: { start_date, end_date }` object (ISO dates).
 - Statements-only: `products: ['statements']`. With other products: put `statements` in
   `required_if_supported_products` → unsupported institutions still link; Statements calls then return

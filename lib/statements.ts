@@ -142,15 +142,27 @@ export async function fetchStatementsForTenant(
     list = await listStatements(accessToken)
   } catch (err) {
     const code = plaidErrorCode(err)
-    const state =
-      code === 'PRODUCTS_NOT_SUPPORTED' || code === 'INSTITUTION_NOT_SUPPORTED'
-        ? 'unsupported'
-        : code === 'ADDITIONAL_CONSENT_REQUIRED' || code === 'INVALID_PRODUCT' || code === 'PRODUCT_NOT_READY'
+    // Before the tenant has approved statements, any product/consent error just
+    // means "ask them" — Statements isn't on the Item yet. After consent, the
+    // same codes mean the bank genuinely doesn't support it (→ paystub fallback).
+    const consented = Boolean(link.statements?.consentedAt)
+    const productIssue =
+      code === 'PRODUCTS_NOT_SUPPORTED' ||
+      code === 'INSTITUTION_NOT_SUPPORTED' ||
+      code === 'ADDITIONAL_CONSENT_REQUIRED' ||
+      code === 'INVALID_PRODUCT' ||
+      code === 'PRODUCT_NOT_ENABLED' ||
+      code === 'PRODUCT_NOT_READY'
+    const state = !productIssue
+      ? 'error'
+      : !consented
+        ? 'needs_consent'
+        : code === 'PRODUCT_NOT_READY'
           ? 'needs_consent'
-          : 'error'
+          : 'unsupported'
     if (state === 'error') logError('statements/list', err, { tenantId })
     else logWarn('statements/list', `statements ${state}`, { tenantId, code })
-    await setStatementsState(tenantId, { ...link.statements, requestedAt: new Date(), status: state })
+    await setStatementsState(tenantId, { ...link.statements, requestedAt: link.statements?.requestedAt ?? new Date(), status: state })
     return state
   }
 
@@ -184,7 +196,7 @@ export async function fetchStatementsForTenant(
       logError('statements/download', err, { tenantId })
     }
   }
-  await setStatementsState(tenantId, { requestedAt: link.statements?.requestedAt ?? new Date(), status: 'fetched', fetchedAt: new Date() })
+  await setStatementsState(tenantId, { ...link.statements, requestedAt: link.statements?.requestedAt ?? new Date(), status: 'fetched', fetchedAt: new Date() })
   return 'fetched'
 }
 

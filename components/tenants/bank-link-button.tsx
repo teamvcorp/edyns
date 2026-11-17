@@ -39,7 +39,7 @@ export function BankLinkButton({ mode = 'link', label }: { mode?: BankLinkMode; 
         setToken(d.link_token)
         try {
           localStorage.setItem('plaid_link_token', d.link_token)
-          localStorage.setItem('plaid_link_purpose', mode === 'link' ? 'bank-link' : 'bank-relink')
+          localStorage.setItem('plaid_link_purpose', mode === 'link' ? 'bank-link' : mode === 'statements' ? 'bank-statements' : 'bank-relink')
         } catch (e) {
           console.warn('[bank-link] localStorage unavailable:', e)
         }
@@ -65,7 +65,7 @@ export function BankLinkButton({ mode = 'link', label }: { mode?: BankLinkMode; 
         const res =
           mode === 'link'
             ? await completeBankLink(publicToken, metadata.accounts?.[0]?.id ?? '')
-            : await completeBankRelink()
+            : await completeBankRelink(mode === 'statements' ? 'statements' : 'relink')
         if (res?.error) setError(res.error)
         else router.refresh()
       })
