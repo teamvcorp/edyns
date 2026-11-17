@@ -1,11 +1,13 @@
 import Stripe from 'stripe'
-import { getStripe, invoiceSubscriptionId, invoiceRentSplit } from '@/lib/stripe'
+import { getStripe, invoiceSubscriptionId, invoiceRentSplit, setSubscriptionPaymentMethod } from '@/lib/stripe'
 import {
   applyFeeResult,
   setBillingStatusBySubscription,
   syncPauseFromStripe,
   getTenantBySubscriptionId,
   markShortfallPaid,
+  setDefaultPaymentMethod,
+  getTenantById,
   type BillingStatus,
   type Tenant,
 } from '@/lib/tenants'
@@ -112,6 +114,33 @@ export async function POST(request: Request): Promise<Response> {
       const invoiceId = session.metadata.invoiceId
       const phase = session.metadata.phase as PaymentPhase | undefined
       if (invoiceId && phase) await recordInvoicePayment(invoiceId, session.id, phase, paid && !failed)
+    } else if (session.metadata?.type === 'payment_method_update') {
+      // Tenant saved a new bank account for payments (Checkout SETUP mode,
+      // app/actions/paychecks.ts updatePaymentAccountAction). Make it the default
+      // and move any live subscription onto it. No money moved.
+      const tenantId = session.metadata.tenantId
+      const siId = typeof session.setup_intent === 'string' ? session.setup_intent : session.setup_intent?.id
+      if (tenantId && siId && session.status === 'complete') {
+        try {
+          const si = await getStripe().setupIntents.retrieve(siId)
+          const pmId = typeof si.payment_method === 'string' ? si.payment_method : si.payment_method?.id
+          if (si.status === 'succeeded' && pmId) {
+            await setDefaultPaymentMethod(tenantId, pmId)
+            const t = await getTenantById(tenantId)
+            if (t?.stripeCustomerId) {
+              await getStripe().customers.update(t.stripeCustomerId, { invoice_settings: { default_payment_method: pmId } })
+            }
+            if (t?.billing && t.billing.status !== 'canceled') {
+              await setSubscriptionPaymentMethod(t.billing.stripeSubscriptionId, pmId)
+            }
+          } else {
+            logWarn('stripe/webhook/payment-update', `setup intent not usable (${si.status})`, { tenantId })
+          }
+        } catch (err) {
+          logError('stripe/webhook/payment-update', err, { tenantId })
+          return new Response('Payment method update failed', { status: 500 }) // Stripe retries
+        }
+      }
     } else if (session.metadata?.type === 'rent_shortfall') {
       // Own-landlord tenant paid this month's rent difference (app/actions/tenants.ts
       // payShortfallAction). Metadata was written by our server and the event is

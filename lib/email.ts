@@ -371,6 +371,42 @@ export async function sendBankRelinkEmail(input: { to: string; name: string }): 
   await sendEmail({ to: input.to, subject: 'Please reconnect your bank', html })
 }
 
+/** Staff notice (ALERT_EMAIL, else FROM_EMAIL): something needs an admin's attention. Ids/names only. */
+export async function sendStaffNotice(input: { subject: string; body: string; link?: string }): Promise<void> {
+  const to = process.env.ALERT_EMAIL ?? process.env.FROM_EMAIL
+  if (!to) return
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <p>${escapeHtml(input.body)}</p>
+      ${input.link ? `<p><a href="${escapeHtml(`${baseUrl}${input.link}`)}">Open in admin</a></p>` : ''}
+      <p style="color:#6b6b60;font-size:13px">Automated notice from edynsgate.</p>
+    </div>`
+  await sendEmail({ to, subject: `[edynsgate] ${input.subject}`, html })
+}
+
+/** Tell a tenant whether their program-change request was approved. */
+export async function sendProgramChangeDecisionEmail(input: {
+  to: string
+  name: string
+  approved: boolean
+  programLabel: string
+  detail?: string
+}): Promise<void> {
+  const html = `
+    <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
+      <h2 style="font-weight:600">${input.approved ? 'Your program change is approved' : 'About your program change request'}, ${escapeHtml(input.name)}</h2>
+      <p>${
+        input.approved
+          ? `You’re now in <strong>${escapeHtml(input.programLabel)}</strong>.`
+          : `We weren’t able to move you to <strong>${escapeHtml(input.programLabel)}</strong> right now.`
+      }</p>
+      ${input.detail ? `<p>${escapeHtml(input.detail)}</p>` : ''}
+      <p><a href="${escapeHtml(`${baseUrl}/tenants`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View your portal</a></p>
+      <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>
+    </div>`
+  await sendEmail({ to: input.to, subject: input.approved ? 'Your program change is approved' : 'About your program change request', html })
+}
+
 /** Tell a tenant their rent was paused or resumed by our team. */
 export async function sendRentPauseEmail(input: {
   to: string

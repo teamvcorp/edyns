@@ -14,6 +14,7 @@ import { TenantBillingForm } from '@/components/admin/tenant-billing-form'
 import { EmploymentTypeForm } from '@/components/admin/employment-type-form'
 import { IncomeVerifyForm } from '@/components/admin/income-verify-form'
 import { PaycheckActionForm } from '@/components/admin/paycheck-forms'
+import { ProgramChangeReview } from '@/components/admin/program-change-review'
 import { decideDepositAction } from '@/app/actions/paychecks'
 import { paycheckCollectionEnabled, listDeposits, monthlyDepositTotals } from '@/lib/paychecks'
 import { listStatementsForTenant } from '@/lib/statements'
@@ -277,6 +278,39 @@ export default async function AdminTenantReviewPage({
               Invited with this home in mind (a hint only — no move-in request was filed).{' '}
               <Link href={`/properties/${referredFrom.id}`}>View property</Link>
             </p>
+          </Card>
+        )}
+
+        {/* Program-change request (tenant requests → admin approves; app/actions/program-change.ts) */}
+        {t.programChange?.status === 'pending' && (
+          <Card id="program-change" className="flex flex-col gap-3 ring-amber-500/40">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Program change requested</h3>
+            <p className="text-sm text-olive-950 dark:text-white">
+              {PROGRAMS[t.programChange.from].label} → <strong>{PROGRAMS[t.programChange.to].label}</strong> (
+              {rateSummary(t.programChange.to)}) · requested {new Date(t.programChange.requestedAt).toLocaleDateString()}
+            </p>
+            {t.programChange.note && (
+              <p className="text-sm text-olive-600 dark:text-olive-500">Tenant’s note: {t.programChange.note}</p>
+            )}
+            {t.programChange.landlord && (
+              <p className="text-sm text-olive-700 dark:text-olive-300">
+                New landlord: {t.programChange.landlord.name} · {t.programChange.landlord.phone} · rent{' '}
+                {formatCents(t.programChange.landlord.monthlyRentCents)}/mo
+                {t.programChange.hasPendingLease && (
+                  <>
+                    {' · '}
+                    <Link href={`/admin/tenants/${t.id}/lease?pending=1`} target="_blank" rel="noopener">
+                      View submitted lease
+                    </Link>
+                  </>
+                )}
+              </p>
+            )}
+            <p className="text-xs text-olive-600 dark:text-olive-500">
+              Approving switches the program. Fixed-draft tenants are re-priced to the new program’s rate from their next
+              draft; paycheck-mode tenants use the new rate on their next paycheck.
+            </p>
+            <ProgramChangeReview tenantId={t.id} />
           </Card>
         )}
 

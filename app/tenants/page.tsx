@@ -21,10 +21,15 @@ import { hasActiveRequest } from '@/lib/moveins'
 import { PortalShell } from '@/components/site/portal-shell'
 import { Card } from '@/components/elements/card'
 import { Text } from '@/components/elements/text'
-import { Button, ButtonLink } from '@/components/elements/button'
+import { Button, ButtonLink, SoftButton } from '@/components/elements/button'
 import { Link } from '@/components/elements/link'
 import { BankLinkButton } from '@/components/tenants/bank-link-button'
 import { PaycheckAuthorization } from '@/components/tenants/paycheck-authorization'
+import { DisconnectBankButton } from '@/components/tenants/disconnect-bank-button'
+import { ProgramChangeForm } from '@/components/tenants/program-change-form'
+import { withdrawProgramChangeAction } from '@/app/actions/program-change'
+import { updatePaymentAccountAction } from '@/app/actions/paychecks'
+import { paymentMethodLabel } from '@/lib/stripe'
 import {
   paycheckCollectionEnabled,
   listDeposits,
@@ -51,7 +56,7 @@ const frequencyLabel = { weekly: 'weekly', biweekly: 'every 2 weeks', monthly: '
 export default async function TenantPortalPage({
   searchParams,
 }: {
-  searchParams: Promise<{ identity?: string; shortfall?: string }>
+  searchParams: Promise<{ identity?: string; shortfall?: string; payment?: string }>
 }) {
   const session = await requireRole('tenant', '/tenants/login')
   const sp = await searchParams
@@ -83,6 +88,8 @@ export default async function TenantPortalPage({
   const rentReserve = funds && def.outsideLandlord ? await rentFunds(tenant) : null
   // Per-paycheck collection (feature-flagged; lib/paychecks.ts).
   const paycheckOn = paycheckCollectionEnabled() && tenant.status === 'approved'
+  // Saved payment account (Stripe). e.g. "us_bank_account •••• 6789" — never the full number.
+  const paymentLabel = tenant.defaultPaymentMethodId ? await paymentMethodLabel(tenant.defaultPaymentMethodId) : null
   const paycheckDeposits = paycheckOn && tenant.bankLink ? await listDeposits(tenant.id, 10) : []
   const authorizationText =
     paycheckOn && tenant.bankLink && !tenant.paycheckAuthorization
@@ -191,6 +198,14 @@ export default async function TenantPortalPage({
                       : 'Authorization saved — our team will switch you over from fixed drafts.'}
                 </p>
               </Text>
+              <div className="flex flex-wrap items-start gap-3">
+                <BankLinkButton mode="link" label="Switch to a different account" />
+                {tenant.paycheck?.status !== 'active' && <DisconnectBankButton />}
+              </div>
+              <p className="text-xs text-olive-600 dark:text-olive-500">
+                Switching accounts pauses collection until you re-authorize. Your payment account (below) must be the same
+                account.
+              </p>
               {paycheckDeposits.filter((d) => d.collection).length > 0 && (
                 <ul className="text-sm text-olive-700 dark:text-olive-300">
                   {paycheckDeposits
@@ -212,6 +227,67 @@ export default async function TenantPortalPage({
               </Text>
               <BankLinkButton mode="statements" />
             </div>
+          )}
+        </Card>
+      )}
+
+      {/* Payment account (Stripe) — replace any time; can't be removed while collection runs */}
+      {tenant.status === 'approved' && tenant.stripeCustomerId && (
+        <Card id="payment-account" className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Payment account</h3>
+            <span className="text-sm font-semibold text-olive-700 dark:text-olive-300">{paymentLabel ?? 'None saved'}</span>
+          </div>
+          {sp.payment === 'updated' && (
+            <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
+              Thanks — your new account will show here in a moment.
+            </p>
+          )}
+          {sp.payment === 'error' && (
+            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+              We couldn’t start the update. Please try again.
+            </p>
+          )}
+          {tenant.bankLink?.mask && paymentLabel && !paymentLabel.endsWith(tenant.bankLink.mask) && (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              This isn’t the account your paycheck goes to (ending in {tenant.bankLink.mask}). Please update it to that
+              account.
+            </p>
+          )}
+          <Text className="text-sm/6">
+            <p>The bank account we draft from. You can replace it any time; while collection is running an account is required.</p>
+          </Text>
+          <form action={updatePaymentAccountAction}>
+            <Button type="submit">Update payment account</Button>
+          </form>
+        </Card>
+      )}
+
+      {/* Program change — tenant requests, admin approves (app/actions/program-change.ts) */}
+      {tenant.status === 'approved' && (
+        <Card id="program-change" className="flex flex-col gap-3">
+          <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Change program</h3>
+          {tenant.programChange?.status === 'pending' ? (
+            <>
+              <Text className="text-sm/6">
+                <p>
+                  You asked to move to <strong>{PROGRAMS[tenant.programChange.to].label}</strong> on{' '}
+                  {new Date(tenant.programChange.requestedAt).toLocaleDateString()}. Our team is reviewing it.
+                </p>
+              </Text>
+              <form action={withdrawProgramChangeAction}>
+                <SoftButton type="submit">Withdraw request</SoftButton>
+              </form>
+            </>
+          ) : (
+            <>
+              {tenant.programChange?.status === 'declined' && tenant.programChange.decisionNote && (
+                <p className="text-sm text-olive-600 dark:text-olive-500">
+                  Your last request wasn’t approved: {tenant.programChange.decisionNote}
+                </p>
+              )}
+              <ProgramChangeForm current={program} />
+            </>
           )}
         </Card>
       )}
@@ -445,6 +521,12 @@ export default async function TenantPortalPage({
                 </Text>
               </>
             )}
+            <div className="flex flex-col gap-2 border-t border-olive-950/10 pt-3 dark:border-white/10">
+              <Text className="text-xs/5">
+                <p>New job or pay change? Re-verify your income — this replaces your previous connection.</p>
+              </Text>
+              <PlaidVerifyButton selfEmployed={Boolean(tenant.employment.selfEmployed)} />
+            </div>
           </>
         ) : (
           <>

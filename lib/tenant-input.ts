@@ -85,6 +85,48 @@ export type ParsedTenantForm = {
   lease?: Extract<CheckedUpload, { ok: true }>
 }
 
+/**
+ * Landlord + monthly rent + lease upload, for any form that puts a tenant on an
+ * outside-landlord program (enrollment, program-change requests). One copy of
+ * the rules. `values` must already hold the LANDLORD_FIELDS read from `fd`.
+ */
+export async function parseLandlordFields(
+  fd: FormData,
+  values: Record<string, string>,
+): Promise<{ landlord?: Landlord; lease?: Extract<CheckedUpload, { ok: true }>; errors: Record<string, string> }> {
+  const errors: Record<string, string> = {}
+  if (!values.landlordName) errors.landlordName = 'Enter your landlord’s or property manager’s name.'
+  if (!values.landlordPhone) errors.landlordPhone = 'Enter your landlord’s phone number.'
+  if (values.landlordEmail && !isEmail(values.landlordEmail)) errors.landlordEmail = 'Enter a valid email.'
+  const rent = num(values.monthlyRent ?? '')
+  // Upper bound is a typo guard (e.g. cents typed as dollars), not a policy limit.
+  if (rent === null || rent <= 0 || rent > 100_000) errors.monthlyRent = 'Enter your monthly rent from the lease.'
+
+  const file = fd.get('lease')
+  const checked = await checkUpload(file instanceof File ? file : null, MAX_LEASE_BYTES)
+  const lease = checked.ok ? checked : undefined
+  if (!checked.ok) errors.lease = LEASE_ERRORS[checked.error]
+
+  const landlord: Landlord | undefined =
+    rent !== null && rent > 0
+      ? {
+          name: values.landlordName,
+          phone: values.landlordPhone,
+          email: values.landlordEmail || undefined,
+          paymentAddress: values.landlordPaymentAddress || undefined,
+          monthlyRentCents: Math.round(rent * 100),
+        }
+      : undefined
+  return { landlord, lease, errors }
+}
+
+/** Read the landlord form fields (trimmed) into a values map. */
+export function readLandlordValues(fd: FormData): Record<string, string> {
+  const values: Record<string, string> = {}
+  for (const f of LANDLORD_FIELDS) values[f] = formStr(fd, f)
+  return values
+}
+
 const LEASE_ERRORS: Record<'missing' | 'too-big' | 'bad-type', string> = {
   missing: 'Upload a copy of your lease.',
   'too-big': 'The lease file is too large (4 MB max). Try a smaller PDF or photo.',
@@ -136,27 +178,10 @@ export async function parseTenantForm(
   let landlord: Landlord | undefined
   let lease: ParsedTenantForm['lease']
   if (PROGRAMS[program].outsideLandlord) {
-    if (!values.landlordName) errors.landlordName = 'Enter your landlord’s or property manager’s name.'
-    if (!values.landlordPhone) errors.landlordPhone = 'Enter your landlord’s phone number.'
-    if (values.landlordEmail && !isEmail(values.landlordEmail)) errors.landlordEmail = 'Enter a valid email.'
-    const rent = num(values.monthlyRent)
-    // Upper bound is a typo guard (e.g. cents typed as dollars), not a policy limit.
-    if (rent === null || rent <= 0 || rent > 100_000) errors.monthlyRent = 'Enter your monthly rent from the lease.'
-
-    const file = fd.get('lease')
-    const checked = await checkUpload(file instanceof File ? file : null, MAX_LEASE_BYTES)
-    if (checked.ok) lease = checked
-    else errors.lease = LEASE_ERRORS[checked.error]
-
-    if (rent !== null && rent > 0) {
-      landlord = {
-        name: values.landlordName,
-        phone: values.landlordPhone,
-        email: values.landlordEmail || undefined,
-        paymentAddress: values.landlordPaymentAddress || undefined,
-        monthlyRentCents: Math.round(rent * 100),
-      }
-    }
+    const ll = await parseLandlordFields(fd, values)
+    Object.assign(errors, ll.errors)
+    landlord = ll.landlord
+    lease = ll.lease
   }
 
   if (Object.keys(errors).length > 0) return { values, errors, password, program }

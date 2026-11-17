@@ -26,6 +26,7 @@ export default async function AdminPage() {
   ])
   const pending = properties.filter((p) => p.status === 'pending').length
   const pendingTenants = tenants.filter((t) => t.status === 'pending').length
+  const programChanges = tenants.filter((t) => t.programChange?.status === 'pending').length
   const pendingMoveIns = requests.filter((r) => r.status === 'requested').length
   const pendingPayouts = payouts.filter((p) => p.status === 'requested').length
   const openInvoices = invoices.filter((i) => i.status === 'sent' || i.status === 'accepted').length
@@ -59,7 +60,8 @@ export default async function AdminPage() {
             <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Tenant applications</h3>
             <Text className="text-sm/6">
               <p>
-                {pendingTenants} application{pendingTenants === 1 ? '' : 's'} awaiting review.
+                {pendingTenants} application{pendingTenants === 1 ? '' : 's'} awaiting review
+                {programChanges > 0 ? `, ${programChanges} program change request${programChanges === 1 ? '' : 's'}` : ''}.
               </p>
             </Text>
           </div>

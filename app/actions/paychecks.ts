@@ -12,10 +12,13 @@ import {
   startPaycheckMode,
   pausePaycheckMode,
   setBillingStatusBySubscription,
+  clearPaycheckAuthorization,
+  removeBankLink,
 } from '@/lib/tenants'
 import { exchangePublicToken, getItemAccount, removePlaidItem } from '@/lib/plaid'
 import { encryptString, decryptString } from '@/lib/crypto'
 import { getStripe, getBankAccountLast4 } from '@/lib/stripe'
+import { redirect } from 'next/navigation'
 import {
   paycheckCollectionEnabled,
   syncTenantDeposits,
@@ -37,6 +40,10 @@ import { logError } from '@/lib/log'
  */
 
 export type PaycheckActionResult = { error?: string; ok?: string } | undefined
+
+/** Pause reason used when the tenant switches paycheck accounts; re-authorizing resumes ONLY this pause. */
+const ACCOUNT_CHANGED_REASON = 'Paycheck account changed — waiting for the tenant to re-authorize'
+const baseUrl = (process.env.NEXT_PUBLIC_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '')
 
 function revalidateTenant(tenantId: string) {
   revalidatePath('/tenants')
@@ -66,6 +73,12 @@ export async function completeBankLink(publicToken: string, accountId: string): 
     if (!account || account.type !== 'depository') {
       await removePlaidItem(accessToken).catch((err) => logError('paychecks/link-cleanup', err))
       return { error: 'Please choose the checking or savings account your paycheck goes into.' }
+    }
+    // Switching accounts: the old authorization named the old account, so it no
+    // longer applies — clear it and pause collection until they re-authorize.
+    if (tenant.bankLink) {
+      await clearPaycheckAuthorization(tenant.id)
+      if (tenant.paycheck?.status === 'active') await pausePaycheckMode(tenant.id, ACCOUNT_CHANGED_REASON)
     }
     // Replacing an older connection: remove that Plaid Item so it stops billing.
     if (tenant.bankLink?.accessTokenEnc && tenant.bankLink.itemId !== itemId) {
@@ -148,7 +161,14 @@ export async function acceptPaycheckAuthorization(): Promise<PaycheckActionResul
   })
 
   const onSchedule = tenant.billing && tenant.billing.status !== 'canceled'
-  if (!onSchedule) await startPaycheckMode(tenant.id)
+  if (tenant.paycheck) {
+    // Re-authorizing after switching accounts resumes collection; an admin pause stays paused.
+    if (tenant.paycheck.status === 'paused' && tenant.paycheck.pausedReason === ACCOUNT_CHANGED_REASON) {
+      await startPaycheckMode(tenant.id, { keepCollectFrom: true })
+    }
+  } else if (!onSchedule) {
+    await startPaycheckMode(tenant.id)
+  }
   revalidateTenant(tenant.id)
   return {
     ok: onSchedule
@@ -274,4 +294,58 @@ export async function analyzeStatementsAction(_prev: PaycheckActionResult, fd: F
     logError('paychecks/analyze-statements', err, { tenantId })
     return { error: 'AI reading failed — review manually.' }
   }
+}
+
+// ---- Tenant: bank management (decided 2026-11-17) ------------------------------------
+
+/**
+ * Disconnect the paycheck bank. Allowed only while paycheck collection isn't
+ * active — an active program needs an active payment source (switch accounts
+ * instead). Removes the Plaid Item so it stops billing.
+ */
+export async function disconnectBankAction(): Promise<PaycheckActionResult> {
+  const session = await requireRole('tenant', '/tenants/login')
+  const tenant = await getTenantByUserId(session.sub)
+  if (!tenant?.bankLink) return { error: 'No bank connected.' }
+  if (tenant.paycheck?.status === 'active') {
+    return { error: 'Paycheck collection is active, so a bank account is required. Use “Switch account” instead.' }
+  }
+  try {
+    await removePlaidItem(decryptString(tenant.bankLink.accessTokenEnc))
+  } catch (err) {
+    logError('paychecks/disconnect-item', err, { tenantId: tenant.id }) // still remove our record
+  }
+  await removeBankLink(tenant.id)
+  revalidateTenant(tenant.id)
+  return { ok: 'Bank disconnected.' }
+}
+
+/**
+ * Save a new bank account for payments (Stripe Checkout in SETUP mode — no
+ * charge). Needed when the paycheck account changes, because the debited
+ * account must be the same account. Instant verification only, so the account
+ * is usable immediately. The webhook (metadata.type 'payment_method_update')
+ * makes it the default and moves any live subscription onto it.
+ */
+export async function updatePaymentAccountAction(): Promise<void> {
+  const session = await requireRole('tenant', '/tenants/login')
+  const tenant = await getTenantByUserId(session.sub)
+  if (!tenant?.stripeCustomerId) redirect('/tenants?payment=error')
+  let url: string | null = null
+  try {
+    const checkout = await getStripe().checkout.sessions.create({
+      mode: 'setup',
+      customer: tenant!.stripeCustomerId,
+      payment_method_types: ['us_bank_account'],
+      payment_method_options: { us_bank_account: { verification_method: 'instant' } },
+      metadata: { type: 'payment_method_update', tenantId: tenant!.id },
+      setup_intent_data: { metadata: { type: 'payment_method_update', tenantId: tenant!.id } },
+      success_url: `${baseUrl}/tenants?payment=updated#payment-account`,
+      cancel_url: `${baseUrl}/tenants?payment=canceled#payment-account`,
+    })
+    url = checkout.url
+  } catch (err) {
+    logError('paychecks/payment-update-checkout', err, { tenantId: tenant!.id })
+  }
+  redirect(url ?? '/tenants?payment=error') // external redirect — outside try/catch
 }

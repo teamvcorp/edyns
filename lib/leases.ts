@@ -32,17 +32,25 @@ interface LeaseDoc {
   uploadedAt: Date
 }
 
-let indexReady: Promise<unknown> | undefined
+/**
+ * 'current' = the lease for the tenant's active program; 'pending' = a lease
+ * submitted with a program-change request, promoted to current only when an
+ * admin approves (so a declined request never overwrites the real lease).
+ */
+export type LeaseSlot = 'current' | 'pending'
+const COLLECTION: Record<LeaseSlot, string> = { current: 'leases', pending: 'pendingLeases' }
 
-async function leasesCollection(): Promise<Collection<LeaseDoc>> {
+const indexReady: Partial<Record<LeaseSlot, Promise<unknown>>> = {}
+
+async function leasesCollection(slot: LeaseSlot = 'current'): Promise<Collection<LeaseDoc>> {
   const db = await getDb()
-  const col = db.collection<LeaseDoc>('leases')
-  // One current lease per tenant; a new upload replaces the old one.
-  indexReady ??= col.createIndex({ tenantId: 1 }, { unique: true }).catch((err) => {
-    indexReady = undefined
+  const col = db.collection<LeaseDoc>(COLLECTION[slot])
+  // One lease per tenant per slot; a new upload replaces the old one.
+  indexReady[slot] ??= col.createIndex({ tenantId: 1 }, { unique: true }).catch((err) => {
+    indexReady[slot] = undefined
     throw err
   })
-  await indexReady
+  await indexReady[slot]
   return col
 }
 
@@ -54,10 +62,11 @@ async function leasesCollection(): Promise<Collection<LeaseDoc>> {
 export async function saveLeaseFile(
   tenantId: string,
   file: { bytes: Buffer; contentType: SniffedType },
+  slot: LeaseSlot = 'current',
 ): Promise<{ uploadedAt: Date }> {
   if (!ObjectId.isValid(tenantId)) throw new Error('saveLeaseFile: invalid tenant id')
   const uploadedAt = new Date()
-  const col = await leasesCollection()
+  const col = await leasesCollection(slot)
   await col.updateOne(
     { tenantId: new ObjectId(tenantId) },
     {
@@ -75,10 +84,29 @@ export async function saveLeaseFile(
 }
 
 /** Decrypt a tenant's lease for the admin viewer route. Null if none. */
-export async function readLeaseFile(tenantId: string): Promise<{ bytes: Buffer; contentType: SniffedType } | null> {
+export async function readLeaseFile(
+  tenantId: string,
+  slot: LeaseSlot = 'current',
+): Promise<{ bytes: Buffer; contentType: SniffedType } | null> {
   if (!ObjectId.isValid(tenantId)) return null
-  const col = await leasesCollection()
+  const col = await leasesCollection(slot)
   const doc = await col.findOne({ tenantId: new ObjectId(tenantId) })
   if (!doc) return null
   return { bytes: decryptBuffer(Buffer.from(doc.data.buffer)), contentType: doc.contentType }
+}
+
+/** Approve: the pending lease becomes the current one. Returns its metadata, or null if none. */
+export async function promotePendingLease(tenantId: string): Promise<{ uploadedAt: Date; contentType: SniffedType } | null> {
+  const pending = await readLeaseFile(tenantId, 'pending')
+  if (!pending) return null
+  const { uploadedAt } = await saveLeaseFile(tenantId, pending, 'current')
+  await discardPendingLease(tenantId)
+  return { uploadedAt, contentType: pending.contentType }
+}
+
+/** Decline (or replace) a request: drop its pending lease. */
+export async function discardPendingLease(tenantId: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await leasesCollection('pending')
+  await col.deleteOne({ tenantId: new ObjectId(tenantId) })
 }

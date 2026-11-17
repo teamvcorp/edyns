@@ -174,6 +174,23 @@ export interface PaycheckMode {
   pausedReason?: string
 }
 
+/**
+ * A tenant's request to move to a different program (tenant requests → admin
+ * approves). Outside-landlord targets carry the landlord details; the lease
+ * file is held in the 'pending' lease slot (lib/leases.ts) until approval.
+ */
+export interface ProgramChangeRequest {
+  from: ProgramId
+  to: ProgramId
+  landlord?: Landlord
+  hasPendingLease?: boolean
+  note?: string
+  status: 'pending' | 'approved' | 'declined'
+  requestedAt: Date
+  decidedAt?: Date
+  decisionNote?: string
+}
+
 export interface ShortfallNotice {
   month: string
   amountCents: number
@@ -202,6 +219,8 @@ export interface TenantDoc {
   lease?: { uploadedAt: Date; contentType: string }
   /** Outside-landlord programs only: the latest monthly rent shortfall notice. */
   shortfall?: ShortfallNotice
+  /** Latest program-change request (pending, or the last decision). */
+  programChange?: ProgramChangeRequest
   /** Per-paycheck collection (feature-flagged): bank connection, authorization, mode. */
   bankLink?: BankLink
   paycheckAuthorization?: PaycheckAuthorization
@@ -474,6 +493,93 @@ export async function pausePaycheckMode(tenantId: string, reason: string): Promi
     { _id: new ObjectId(tenantId), paycheck: { $exists: true } },
     { $set: { 'paycheck.status': 'paused', 'paycheck.pausedAt': new Date(), 'paycheck.pausedReason': reason, updatedAt: new Date() } },
   )
+}
+
+// ---- Program changes (tenant requests → admin approves) ----
+
+/** Save a request. Atomic: refuses if another request is already pending. */
+export async function createProgramChangeRequest(tenantId: string, req: ProgramChangeRequest): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'programChange.status': { $ne: 'pending' } },
+    { $set: { programChange: req, updatedAt: new Date() } },
+  )
+  return res.modifiedCount === 1
+}
+
+/** Close the pending request (approved / declined / withdrawn). Atomic on status. */
+export async function decideProgramChange(
+  tenantId: string,
+  status: 'approved' | 'declined',
+  decisionNote?: string,
+): Promise<boolean> {
+  if (!ObjectId.isValid(tenantId)) return false
+  const col = await tenantsCollection()
+  const res = await col.updateOne(
+    { _id: new ObjectId(tenantId), 'programChange.status': 'pending' },
+    {
+      $set: {
+        'programChange.status': status,
+        'programChange.decidedAt': new Date(),
+        ...(decisionNote ? { 'programChange.decisionNote': decisionNote } : {}),
+        updatedAt: new Date(),
+      },
+    },
+  )
+  return res.modifiedCount === 1
+}
+
+/**
+ * Switch the tenant's program. Landlord details are set for outside-landlord
+ * programs and removed otherwise; any old shortfall notice is cleared when the
+ * tenant no longer has an outside landlord.
+ */
+export async function setTenantProgram(
+  tenantId: string,
+  program: ProgramId,
+  landlord?: Landlord,
+  lease?: { uploadedAt: Date; contentType: string },
+): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  const outside = PROGRAMS[program].outsideLandlord
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    {
+      $set: {
+        program,
+        ...(outside && landlord ? { landlord } : {}),
+        ...(outside && lease ? { lease } : {}),
+        updatedAt: new Date(),
+      },
+      ...(outside ? {} : { $unset: { landlord: '', shortfall: '' } }),
+    },
+  )
+}
+
+/** Paycheck account changed → the old authorization (tied to the old account) no longer applies. */
+export async function clearPaycheckAuthorization(tenantId: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $unset: { paycheckAuthorization: '' }, $set: { updatedAt: new Date() } })
+}
+
+/** Tenant disconnected their paycheck bank (only allowed when paycheck mode isn't active). */
+export async function removeBankLink(tenantId: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne(
+    { _id: new ObjectId(tenantId) },
+    { $unset: { bankLink: '', paycheckAuthorization: '' }, $set: { updatedAt: new Date() } },
+  )
+}
+
+/** New default payment method saved through Stripe (payment-account update). */
+export async function setDefaultPaymentMethod(tenantId: string, paymentMethodId: string): Promise<void> {
+  if (!ObjectId.isValid(tenantId)) return
+  const col = await tenantsCollection()
+  await col.updateOne({ _id: new ObjectId(tenantId) }, { $set: { defaultPaymentMethodId: paymentMethodId, updatedAt: new Date() } })
 }
 
 /** Record that a lease was stored (the file itself is in lib/leases.ts). */

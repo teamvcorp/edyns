@@ -8,9 +8,9 @@ import {
   recordPlaidLink,
   flagTenantForReview,
 } from '@/lib/tenants'
-import { exchangePublicToken } from '@/lib/plaid'
+import { exchangePublicToken, removePlaidItem } from '@/lib/plaid'
 import { readIncome } from '@/lib/income'
-import { encryptString } from '@/lib/crypto'
+import { encryptString, decryptString } from '@/lib/crypto'
 import { sendSecurityAlert } from '@/lib/email'
 import { logError } from '@/lib/log'
 
@@ -44,6 +44,12 @@ export async function completePlaidLink(publicToken: string): Promise<PlaidResul
 
   try {
     const { accessToken, itemId } = await exchangePublicToken(publicToken)
+    // Re-verifying replaces the old connection: remove that Plaid Item so it stops billing.
+    if (tenant.plaidAccessTokenEnc && tenant.plaidItemId && tenant.plaidItemId !== itemId) {
+      await removePlaidItem(decryptString(tenant.plaidAccessTokenEnc)).catch((err) =>
+        logError('plaid/remove-old-income-item', err, { tenantId: tenant.id }),
+      )
+    }
     // Read income the right way for this tenant: Payroll gross + hours for
     // employees, Bank deposits + implied hours for the self-employed.
     const reading = tenant.plaidUserToken
