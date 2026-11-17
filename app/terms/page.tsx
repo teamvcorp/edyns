@@ -3,6 +3,9 @@ import React from "react";
 // Reviewed by counsel 2026-11-14 (programs, landlord payments, car program,
 // available rent funds). Rates come from lib/programs.ts — keep this text in sync
 // if they change, and have counsel re-review any material change.
+// CHANGED 2026-11-17, NOT YET RE-REVIEWED: Car Program vehicle ownership now reads
+// "the company or its nonprofit partner" because donated vehicles are titled to
+// The Von Der Becke Academy Corp (the nonprofit), not to edynsgate.
 
 export default function TermsOfService() {
   return (
@@ -72,7 +75,8 @@ export default function TermsOfService() {
               its insurance
             </li>
             <li>
-              The vehicle remains the property of the company. You must return it if
+              The vehicle remains the property of the company or its nonprofit
+              partner, The Von Der Becke Academy Corp. You must return it if
               your payments stop or you leave the program
             </li>
           </ul>

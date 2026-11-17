@@ -2,6 +2,8 @@ import React from "react";
 
 // Reviewed by counsel 2026-11-14 (sections 1 and 7: outside-landlord programs and
 // the car program). Rates come from lib/programs.ts — keep in sync.
+// CHANGED 2026-11-17, NOT YET RE-REVIEWED: program vehicles may be owned by the
+// company or its nonprofit partner (The Von Der Becke Academy Corp).
 
 export default function PrivacyPolicy() {
   return (
@@ -41,8 +43,9 @@ export default function PrivacyPolicy() {
             </li>
             <li>
               Your Home rent funds are paid to the landlord you name. Car Program
-              payments are retained by the company to provide a company-owned
-              vehicle and its insurance; they are not held in trust, savings or
+              payments are retained by the company to provide a vehicle (owned by
+              the company or its nonprofit partner, The Von Der Becke Academy
+              Corp) and its insurance; they are not held in trust, savings or
               investment on your behalf.
             </li>
             <li>
@@ -131,7 +134,7 @@ export default function PrivacyPolicy() {
             By using the platform, you acknowledge:
           </p>
           <ul className="list-disc list-inside mt-2 space-y-1">
-            <li>No savings or ownership is created from payments; vehicles provided under the Car Program remain company property</li>
+            <li>No savings or ownership is created from payments; vehicles provided under the Car Program remain the property of the company or its nonprofit partner</li>
             <li>Funds paid are not recoverable unless explicitly stated</li>
             <li>Service access may depend on continued payment participation</li>
           </ul>

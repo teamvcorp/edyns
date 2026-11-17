@@ -352,7 +352,7 @@ export default async function TenantPortalPage({
         )}
       </Card>
 
-      {/* Car program: trust period, then an edynsgate-owned car + insurance (lib/car-assignments.ts) */}
+      {/* Car program: trust period, then a program-owned car (edynsgate or the nonprofit) + insurance (lib/car-assignments.ts) */}
       {def.carRate > 0 && tenant.status === 'approved' && (
         <Card id="car" className="flex flex-col gap-3">
           <h3 className="text-lg font-semibold text-olive-950 dark:text-white">Your car</h3>
@@ -360,8 +360,8 @@ export default async function TenantPortalPage({
             <Text className="text-sm/6">
               <p>
                 <strong>{activeCar.vehicle}</strong>
-                {activeCar.plate ? ` · plate ${activeCar.plate}` : ''}. edynsgate owns this car and pays its
-                insurance{activeCar.insurance ? ` (${activeCar.insurance})` : ''}. Keep up your car program payments to
+                {activeCar.plate ? ` · plate ${activeCar.plate}` : ''}. This car belongs to the program (edynsgate or
+                its nonprofit partner), and edynsgate pays its insurance{activeCar.insurance ? ` (${activeCar.insurance})` : ''}. Keep up your car program payments to
                 keep using it — if payments stop or you leave the program, the car is returned.
               </p>
               {activeCar.notes && <p>{activeCar.notes}</p>}

@@ -1131,7 +1131,7 @@ export default async function AdminTenantReviewPage({
                       </p>
                     )}
                     <p className="text-sm text-olive-600 dark:text-olive-500">
-                      edynsgate owns this car. If the tenant stops paying or leaves the program, collect the car and
+                      The program owns this car (edynsgate, or the nonprofit for donated cars). If the tenant stops paying or leaves the program, collect the car and
                       mark it returned.
                     </p>
                     <ReturnCarForm assignmentId={activeCar.id} />
@@ -1140,7 +1140,7 @@ export default async function AdminTenantReviewPage({
                   <>
                     <p className="text-sm text-olive-600 dark:text-olive-500">
                       {carTrusted
-                        ? 'Trust period complete — assign a car edynsgate owns. Edynsgate pays its insurance.'
+                        ? 'Trust period complete — assign a program-owned car (edynsgate or the nonprofit). Edynsgate pays its insurance.'
                         : `Cars are provided after ${CAR_TRUST_MONTHS} months of car payments${
                             carEligibleDate ? ` (${carEligibleDate.toLocaleDateString()})` : ''
                           }. You can provide one early if you trust the tenant.`}

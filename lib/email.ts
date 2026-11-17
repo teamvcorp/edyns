@@ -303,14 +303,14 @@ export async function sendRentShortfallEmail(input: {
   await sendEmail({ to: input.to, subject: `Your ${input.monthLabel} rent has a balance due`, html })
 }
 
-/** Car program: edynsgate has assigned the tenant a car (edynsgate owns it and pays the insurance). */
+/** Car program: edynsgate has assigned the tenant a car (owned by edynsgate or its nonprofit partner; edynsgate pays the insurance). */
 export async function sendCarAssignedEmail(input: { to: string; name: string; vehicle: string }): Promise<void> {
   const html = `
     <div style="font-family:Inter,system-ui,sans-serif;color:#2b2b25;line-height:1.6">
       <h2 style="font-weight:600">Your car is ready, ${escapeHtml(input.name)}</h2>
       <p>Thanks for building trust with your car program payments. We’ve assigned you:</p>
       <p style="font-size:16px"><strong>${escapeHtml(input.vehicle)}</strong></p>
-      <p>edynsgate owns the car and pays its insurance. Keep up your car program payments to keep using it.
+      <p>The car belongs to the program (edynsgate or its nonprofit partner), and edynsgate pays its insurance. Keep up your car program payments to keep using it.
       Our team will contact you about pickup.</p>
       <p><a href="${escapeHtml(`${baseUrl}/tenants#car`)}" style="display:inline-block;background:#26301b;color:#fff;border-radius:9999px;padding:10px 18px;text-decoration:none">View in your portal</a></p>
       <p style="color:#6b6b60;font-size:13px">Questions? Just reply to this email.</p>

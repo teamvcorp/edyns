@@ -4,7 +4,8 @@ import { ObjectId, MongoServerError, type Collection } from 'mongodb'
 import { getDb } from './mongodb'
 
 /**
- * Car program assignments — a car edynsgate OWNS, provided to a tenant (with
+ * Car program assignments — a car the PROGRAM owns (edynsgate, or its nonprofit
+ * partner The Von Der Becke Academy Corp for donated cars), provided to a tenant (with
  * insurance paid by edynsgate) once they've paid the car program's 10% through
  * the trust period (CAR_TRUST_MONTHS in lib/programs.ts; an admin may provide
  * it earlier or later). If the tenant stops paying or leaves the program, the

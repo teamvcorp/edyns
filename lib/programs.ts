@@ -13,8 +13,10 @@
 //   car_only          10% car program only.
 // CAR PROGRAM: the 10% is KEPT by edynsgate (not savings, not refundable). After
 // a trust period (CAR_TRUST_MONTHS of payments, admin can provide earlier/later)
-// edynsgate provides a car it OWNS and pays its insurance; the car is returned
-// if the tenant stops paying or leaves (lib/car-assignments.ts).
+// edynsgate provides a car and pays its insurance; the car is returned if the
+// tenant stops paying or leaves (lib/car-assignments.ts). The car is owned by
+// edynsgate, or by its nonprofit partner The Von Der Becke Academy Corp when it
+// was donated (decided 2026-11-17) — never by the tenant.
 // Every program requires the 35-hr/week effort commitment (REQUIRED_WEEKLY_HOURS).
 
 import type { BillingFrequency } from './tenants' // type-only: erased at build, safe on the client
