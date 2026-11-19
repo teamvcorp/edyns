@@ -40,7 +40,8 @@ import { logError, logWarn } from '@/lib/log'
  * public POST endpoint, so each one re-checks the feature flag and permissions.
  */
 
-export type PaycheckActionResult = { error?: string; ok?: string } | undefined
+/** `fix: 'update_payment'` tells the UI to offer the Update payment account button inline. */
+export type PaycheckActionResult = { error?: string; ok?: string; fix?: 'update_payment' } | undefined
 
 /** Pause reason used when the tenant switches paycheck accounts; re-authorizing resumes ONLY this pause. */
 const ACCOUNT_CHANGED_REASON = 'Paycheck account changed — waiting for the tenant to re-authorize'
@@ -154,23 +155,28 @@ export async function acceptPaycheckAuthorization(): Promise<PaycheckActionResul
   if (!tenant || tenant.status !== 'approved') return { error: 'Available after approval.' }
   // Each refusal is logged (reason + tenant id only — no names or account digits)
   // so a tenant who "had to try twice" shows up in Vercel logs as [paychecks/authorize].
-  const refuse = (reason: string, error: string): PaycheckActionResult => {
+  const refuse = (reason: string, error: string, fix?: 'update_payment'): PaycheckActionResult => {
     logWarn('paychecks/authorize', `authorization refused: ${reason}`, { tenantId: tenant.id })
-    return { error }
+    return { error, fix }
   }
   if (tenant.bankLink?.status !== 'active') return refuse('bank_not_active', 'Connect your bank first.')
   if (!tenant.defaultPaymentMethodId) {
-    return refuse('no_payment_method', 'No saved bank account for payments yet — use “Update payment account” below.')
+    return refuse('no_payment_method', 'You don’t have a bank account saved for payments yet. Add your paycheck account, then authorize again.', 'update_payment')
   }
 
   const bank = await getBankAccountLast4(tenant.defaultPaymentMethodId)
   if (!bank) {
-    return refuse('payment_method_not_bank', 'Your payment account must be a bank account — use “Update payment account” below.')
+    return refuse(
+      'payment_method_not_bank',
+      'Your payment account is a card, but paycheck collection needs a bank account. Switch it to your paycheck account, then authorize again.',
+      'update_payment',
+    )
   }
   if (tenant.bankLink.mask && bank.last4 !== tenant.bankLink.mask && !accountMismatchAllowedForTesting()) {
     return refuse(
       'account_mismatch',
-      `Your payment account ends in ${bank.last4}, but your paycheck account ends in ${tenant.bankLink.mask}. They must be the same account — use “Update payment account” below, then authorize again.`,
+      `Your payment account ends in ${bank.last4}, but your paycheck account ends in ${tenant.bankLink.mask}. They must be the same account — switch your payment account, then authorize again.`,
+      'update_payment',
     )
   }
 

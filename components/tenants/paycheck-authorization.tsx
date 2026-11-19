@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/elements/button'
-import { acceptPaycheckAuthorization } from '@/app/actions/paychecks'
+import { acceptPaycheckAuthorization, updatePaymentAccountAction, type PaycheckActionResult } from '@/app/actions/paychecks'
 
 /**
  * The per-paycheck debit authorization. The text is built on the SERVER
@@ -14,7 +14,7 @@ import { acceptPaycheckAuthorization } from '@/app/actions/paychecks'
 export function PaycheckAuthorization({ text }: { text: string }) {
   const router = useRouter()
   const [agreed, setAgreed] = useState(false)
-  const [message, setMessage] = useState<{ error?: string; ok?: string } | null>(null)
+  const [message, setMessage] = useState<PaycheckActionResult | null>(null)
   const [pending, startTransition] = useTransition()
 
   return (
@@ -41,9 +41,19 @@ export function PaycheckAuthorization({ text }: { text: string }) {
         {pending ? 'Saving…' : 'Authorize paycheck collection'}
       </Button>
       {message?.error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {message.error}
-        </p>
+        <div className="flex flex-col gap-2">
+          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+            {message.error}
+          </p>
+          {/* Self-service fix: opens Stripe to save the paycheck bank account (no charge). */}
+          {message.fix === 'update_payment' && (
+            <form action={updatePaymentAccountAction}>
+              <Button type="submit" className="w-fit">
+                Update payment account
+              </Button>
+            </form>
+          )}
+        </div>
       )}
       {message?.ok && (
         <p role="status" className="text-sm text-olive-700 dark:text-olive-300">
