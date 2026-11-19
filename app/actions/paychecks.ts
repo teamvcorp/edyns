@@ -31,7 +31,7 @@ import {
   AUTHORIZATION_VERSION,
   accountMismatchAllowedForTesting,
 } from '@/lib/paychecks'
-import { logError } from '@/lib/log'
+import { logError, logWarn } from '@/lib/log'
 
 /**
  * Per-paycheck collection actions (lib/paychecks.ts; plan in
@@ -152,19 +152,30 @@ export async function acceptPaycheckAuthorization(): Promise<PaycheckActionResul
   if (!paycheckCollectionEnabled()) return { error: 'Not available yet.' }
   const tenant = await getTenantByUserId(session.sub)
   if (!tenant || tenant.status !== 'approved') return { error: 'Available after approval.' }
-  if (tenant.bankLink?.status !== 'active') return { error: 'Connect your bank first.' }
-  if (!tenant.defaultPaymentMethodId) return { error: 'No saved bank account for payments yet.' }
+  // Each refusal is logged (reason + tenant id only — no names or account digits)
+  // so a tenant who "had to try twice" shows up in Vercel logs as [paychecks/authorize].
+  const refuse = (reason: string, error: string): PaycheckActionResult => {
+    logWarn('paychecks/authorize', `authorization refused: ${reason}`, { tenantId: tenant.id })
+    return { error }
+  }
+  if (tenant.bankLink?.status !== 'active') return refuse('bank_not_active', 'Connect your bank first.')
+  if (!tenant.defaultPaymentMethodId) {
+    return refuse('no_payment_method', 'No saved bank account for payments yet — use “Update payment account” below.')
+  }
 
   const bank = await getBankAccountLast4(tenant.defaultPaymentMethodId)
-  if (!bank) return { error: 'Your saved payment method must be a bank account. Contact us to update it.' }
+  if (!bank) {
+    return refuse('payment_method_not_bank', 'Your payment account must be a bank account — use “Update payment account” below.')
+  }
   if (tenant.bankLink.mask && bank.last4 !== tenant.bankLink.mask && !accountMismatchAllowedForTesting()) {
-    return {
-      error: `Your payment account ends in ${bank.last4}, but the connected bank account ends in ${tenant.bankLink.mask}. They must be the same account — contact us to update it.`,
-    }
+    return refuse(
+      'account_mismatch',
+      `Your payment account ends in ${bank.last4}, but your paycheck account ends in ${tenant.bankLink.mask}. They must be the same account — use “Update payment account” below, then authorize again.`,
+    )
   }
 
   const rangeMaxCents = defaultRangeMaxCents(tenant)
-  if (rangeMaxCents <= 0) return { error: 'We need your verified income first.' }
+  if (rangeMaxCents <= 0) return refuse('no_verified_income', 'We need your verified income first.')
   const h = await headers()
   await recordPaycheckAuthorization(tenant.id, {
     acceptedAt: new Date(),
